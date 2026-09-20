@@ -29,6 +29,8 @@ struct Window {
   struct river_node_v1 *river_node;
   struct wl_list link;
 
+  char *title;
+
   int x;
   int y;
 

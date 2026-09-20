@@ -333,7 +333,7 @@ void river_output_v1_position(void *data, struct river_output_v1 *obj,
     Tag *tag = output->tags[i];
 
     tag->root->x = x + gappx;
-    tag->root->y = y + (show_bar ? barpx : 0) + gappx;
+    tag->root->y = y + (show_bar && top_bar ? barpx : 0) + gappx;
   }
 }
 
@@ -373,6 +373,7 @@ void river_window_v1_closed(void *data, struct river_window_v1 *obj) {
 
   river_window_v1_destroy(window->river_window);
   wl_list_remove(&window->link);
+  free(window->title);
   free(window);
 }
 
@@ -390,7 +391,12 @@ void river_window_v1_dimensions(void *data, struct river_window_v1 *obj,
 void river_window_v1_app_id(void *data, struct river_window_v1 *obj,
                             const char *app_id) {}
 void river_window_v1_title(void *data, struct river_window_v1 *obj,
-                           const char *title) {}
+                           const char *title) {
+  Window *window = data;
+
+  free(window->title);
+  window->title = title == NULL ? NULL : strdup(title);
+}
 void river_window_v1_parent(void *data, struct river_window_v1 *obj,
                             struct river_window_v1 *parent) {}
 void river_window_v1_decoration_hint(void *data, struct river_window_v1 *obj,
@@ -683,7 +689,8 @@ void monocle(Output *output) {
       queue[back++] = n->second;
     } else if (n->window != NULL) {
       river_window_v1_show(n->window->river_window);
-      window_set_position(n->window, output->x, (show_bar ? barpx : 0));
+      window_set_position(n->window, output->x,
+                          output->y + (show_bar && top_bar ? barpx : 0));
       window_set_dimensions(n->window, output->width,
                             output->height - (show_bar ? barpx : 0));
     }
@@ -764,9 +771,11 @@ int allocate_shm_file(size_t size) {
 }
 // ---
 
-static pixman_color_t fg = {0xEE00, 0xEE00, 0xEE00, 0xffff};
-static pixman_color_t bg = {0x2200, 0x2200, 0x2200, 0xffff};
-static pixman_color_t ac = {0x0000, 0x5500, 0x7700, 0xffff};
+/* Keep these in sync with dwm/palette.h. */
+static pixman_color_t normfg = {0xebeb, 0xdbdb, 0xb2b2, 0xffff};
+static pixman_color_t normbg = {0x2828, 0x2828, 0x2828, 0xffff};
+static pixman_color_t selfg = {0xfbfb, 0xf1f1, 0xc7c7, 0xffff};
+static pixman_color_t selbg = {0xe7e7, 0x8a8a, 0x3e3e, 0xffff};
 
 int lx(int x, int width, int text_width) { return x; }
 int cx(int x, int width, int text_width) {
@@ -811,6 +820,19 @@ void render_chars(const char *chars, size_t len, int x, int y, int width,
   }
 }
 
+int text_width(const char *text) {
+  int width = 0;
+
+  for (size_t i = 0; text[i] != '\0'; i++) {
+    const struct fcft_glyph *glyph =
+        fcft_rasterize_char_utf32(fcft_font, text[i], FCFT_SUBPIXEL_DEFAULT);
+    if (glyph != NULL)
+      width += glyph->advance.x;
+  }
+
+  return width;
+}
+
 void render_bar(WlOutput *output) {
   /* A layer surface must receive and acknowledge its first configure before
    * it is committed.  Output discovery can arrive in either order. */
@@ -845,41 +867,111 @@ void render_bar(WlOutput *output) {
     return;
   }
 
-  pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &bg, 1,
+  pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &normbg, 1,
                                (pixman_rectangle16_t[]){{0, 0, w, h}});
 
-  pixman_image_t *color = pixman_image_create_solid_fill(&fg);
+  pixman_image_t *fg = pixman_image_create_solid_fill(&normfg);
+  pixman_image_t *sel_fg = pixman_image_create_solid_fill(&selfg);
   int y = (h - fcft_font->height) / 2;
-  int boxw = h + 4; // TODO: remove magic numbers like this
 
-  for (int i = 0; i < LENGTH(tags); i++) {
-    if (output->output->seltag == i) {
-      pixman_image_fill_rectangles(
-          PIXMAN_OP_SRC, pix, &ac, 1,
-          (pixman_rectangle16_t[]){{i * boxw, 0, boxw, h}});
-    }
+  /// Holds the x position within the bar window.
+  int x = 0;
 
-    render_chars(tags[i], 1, i * boxw, y, boxw, &cx, pix, color);
+  /// Holds temporary width values when drawing the bar.
+  int textw;
+
+  /// Common iterator.
+  unsigned int i;
+
+  /// Bitmask that holds occupied workspaces.
+  unsigned int occ = 0;
+
+  Window *window;
+  wl_list_for_each(window, &anvl.windows, link) {
+    if (window->node != NULL)
+      occ |= 1U << window->node->tag->n;
   }
 
-  int ltx = LENGTH(tags) * boxw + boxw / 2;
-  render_chars(output->output->tags[output->output->seltag]->lt->symbol, 3, ltx,
-               y, 0, &lx, pix, color);
+  /* We start by looping through all tags. Do not draw vacant tags, except for
+   * the selected one. This is the same rule as dwm's drawbar(). */
+  for (i = 0; i < LENGTH(tags); i++) {
+    if (!(occ & (1U << i) || i == output->output->seltag))
+      continue;
+
+    textw = text_width(tags[i]) + h;
+    bool selected = i == output->output->seltag;
+    if (selected)
+      pixman_image_fill_rectangles(
+          PIXMAN_OP_SRC, pix, &selbg, 1,
+          (pixman_rectangle16_t[]){{x, 0, textw, h}});
+    render_chars(tags[i], strlen(tags[i]), x, y, textw, &cx, pix,
+                 selected ? sel_fg : fg);
+    x += textw;
+  }
+
+  /* Just draw the layout symbol. */
+  const char *symbol = output->output->tags[output->output->seltag]->lt->symbol;
+  textw = text_width(symbol) + h;
+  render_chars(symbol, strlen(symbol), x, y, textw, &cx, pix, fg);
+  x += textw;
+
+  /* Draw window titles. The window-management protocol supplies titles but
+   * not dwm's icon or scratchpad metadata, so tabs are the direct equivalent
+   * of the title portion of dwm's bar. */
+  int n = 0;
+  wl_list_for_each(window, &anvl.windows, link) {
+    if (window->node != NULL &&
+        window->node->tag == output->output->tags[output->output->seltag])
+      n++;
+  }
 
   time_t rawtime;
   struct tm *timeinfo;
   time(&rawtime);
   timeinfo = localtime(&rawtime);
 
-  char clock[10];
-  int l1 = strftime(clock, sizeof(clock), "%H:%M:%S", timeinfo);
-  render_chars(clock, l1, 0, y, output->width, &cx, pix, color);
+  char status[32];
+  int status_len = strftime(status, sizeof(status), "%a, %d %b %H:%M:%S",
+                            timeinfo);
+  int statusw = text_width(status) + h;
 
-  char date[20];
-  int l2 = strftime(date, sizeof(date), "%a, %d %b", timeinfo);
-  render_chars(date, l2, output->width - 2, y, 0, &rx, pix, color);
+  /* Draw status first so it can be overdrawn by tags later. This follows
+   * dwm's drawbar() ordering and reserves its rightmost space for the status. */
+  if (output->output == selmon)
+    render_chars(status, status_len, w - h / 2, y, 0, &rx, pix, fg);
+  else
+    statusw = 0;
 
-  pixman_image_unref(color);
+  if ((textw = w - statusw - x) > h && n > 0) {
+    int remainder = textw % n;
+    int tabw = textw / n;
+    wl_list_for_each(window, &anvl.windows, link) {
+      if (window->node == NULL ||
+          window->node->tag != output->output->tags[output->output->seltag])
+        continue;
+
+      int tab_width = tabw + (remainder-- > 0 ? 1 : 0);
+      bool selected = false;
+      Seat *seat;
+      wl_list_for_each(seat, &anvl.seats, link) {
+        if (seat->focused == window) {
+          selected = true;
+          break;
+        }
+      }
+      if (selected)
+        pixman_image_fill_rectangles(
+            PIXMAN_OP_SRC, pix, &selbg, 1,
+            (pixman_rectangle16_t[]){{x, 0, tab_width, h}});
+      if (window->title != NULL)
+        render_chars(window->title, strlen(window->title), x + h / 2, y,
+                     tab_width - h, &lx, pix, selected ? sel_fg : fg);
+      x += tab_width;
+    }
+  }
+
+  pixman_image_unref(sel_fg);
+  pixman_image_unref(fg);
 
   wl_surface_attach(output->surface, buf, 0, 0);
   wl_surface_damage(output->surface, 0, 0, w, h);
@@ -1227,11 +1319,16 @@ void wl_output_done(void *data, struct wl_output *wl_output) {
   output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
       zwlr_layer_shell, output->surface, output->wl_output, 1, "bar");
 
-  zwlr_layer_surface_v1_set_size(output->layer_surface, output->width, 20);
-  zwlr_layer_surface_v1_set_anchor(output->layer_surface,
-                                   ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+  /* Width is zero because the left and right anchors make the compositor pick
+   * the output's logical width. wl_output.mode reports physical pixels, which
+   * made the bar too wide on scaled outputs. */
+  zwlr_layer_surface_v1_set_size(output->layer_surface, 0, barpx);
+  zwlr_layer_surface_v1_set_anchor(
+      output->layer_surface,
+      (top_bar ? ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
+               : ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) |
+          ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+          ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
   zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
 
   zwlr_layer_surface_v1_add_listener(output->layer_surface,
