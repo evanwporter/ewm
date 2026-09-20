@@ -25,163 +25,165 @@ typedef struct Seat Seat;
 typedef struct Tag Tag;
 
 struct Window {
-  struct river_window_v1 *river_window;
-  struct river_node_v1 *river_node;
-  struct wl_list link;
+    struct river_window_v1* river_window;
+    struct river_node_v1* river_node;
+    struct wl_list link;
 
-  char *title;
+    char* title;
 
-  int x;
-  int y;
+    int x;
+    int y;
 
-  int width;
-  int height;
+    int width;
+    int height;
 
-  Node *node;
+    Node* node;
 };
 
-typedef enum { HORIZONTAL, VERTICAL, UNSET } split_type_t;
+typedef enum { HORIZONTAL,
+               VERTICAL,
+               UNSET } split_type_t;
 
 struct Node {
-  split_type_t split_type;
-  double split_ratio;
+    split_type_t split_type;
+    double split_ratio;
 
-  int x;
-  int y;
+    int x;
+    int y;
 
-  int width;
-  int height;
+    int width;
+    int height;
 
-  Window *window;
+    Window* window;
 
-  Node *first;
-  Node *second;
-  Node *parent;
+    Node* first;
+    Node* second;
+    Node* parent;
 
-  Tag *tag;
+    Tag* tag;
 };
 
 struct Tag {
-  int n;
-  const char *sym;
+    int n;
+    const char* sym;
 
-  Node *root;
-  Node *focused;
+    Node* root;
+    Node* focused;
 
-  Layout *lt;
+    Layout* lt;
 };
 
 struct Output {
-  struct river_output_v1 *river_output;
-  struct river_layer_shell_output_v1 *river_layer_shell;
-  struct wl_list link;
+    struct river_output_v1* river_output;
+    struct river_layer_shell_output_v1* river_layer_shell;
+    struct wl_list link;
 
-  int x;
-  int y;
+    int x;
+    int y;
 
-  int width;
-  int height;
+    int width;
+    int height;
 
-  uint32_t seltag;
-  Tag *tags[9];
+    uint32_t seltag;
+    Tag* tags[9];
 };
 
 struct WlOutput {
-  struct wl_output *wl_output;
-  struct wl_list link;
+    struct wl_output* wl_output;
+    struct wl_list link;
 
-  Output *output;
+    Output* output;
 
-  int width;
-  int height;
-  int scale;
+    int width;
+    int height;
+    int scale;
 
-  bool done;
-  bool configured;
-  uint32_t name;
+    bool done;
+    bool configured;
+    uint32_t name;
 
-  struct wl_surface *surface;
-  struct zwlr_layer_surface_v1 *layer_surface;
+    struct wl_surface* surface;
+    struct zwlr_layer_surface_v1* layer_surface;
 };
 
 struct Seat {
-  struct river_seat_v1 *river_seat;
-  struct wl_list link;
+    struct river_seat_v1* river_seat;
+    struct wl_list link;
 
-  Window *focused;
+    Window* focused;
 
-  struct wl_list keys;
-  struct wl_list buttons;
+    struct wl_list keys;
+    struct wl_list buttons;
 };
 
 typedef struct {
-  struct wl_list windows;
-  struct wl_list outputs;
-  struct wl_list seats;
-  struct wl_list keyboards;
-  struct wl_list wl_outputs;
+    struct wl_list windows;
+    struct wl_list outputs;
+    struct wl_list seats;
+    struct wl_list keyboards;
+    struct wl_list wl_outputs;
 } WindowManager;
 
 struct Layout {
-  char *symbol;
-  void (*manage)(Output *);
+    char* symbol;
+    void (*manage)(Output*);
 };
 
 typedef union {
-  int i;
-  void *v;
-  float f;
-  uint32_t u;
+    int i;
+    void* v;
+    float f;
+    uint32_t u;
 } Arg;
 
 typedef struct {
-  struct river_xkb_binding_v1 *river_xkb_binding;
-  struct wl_list link;
+    struct river_xkb_binding_v1* river_xkb_binding;
+    struct wl_list link;
 
-  Seat *seat;
+    Seat* seat;
 
-  void (*func)(Seat *seat, Arg *arg);
-  Arg *arg;
+    void (*func)(Seat* seat, Arg* arg);
+    Arg* arg;
 } Key;
 
 typedef struct {
-  struct river_pointer_binding_v1 *river_pointer_binding;
-  struct wl_list link;
+    struct river_pointer_binding_v1* river_pointer_binding;
+    struct wl_list link;
 
-  Seat *seat;
+    Seat* seat;
 
-  bool pressed;
+    bool pressed;
 
-  void (*func)(Seat *seat, Arg *arg);
-  Arg *arg;
+    void (*func)(Seat* seat, Arg* arg);
+    Arg* arg;
 } Button;
 
 typedef struct {
-  uint32_t mods;
-  xkb_keysym_t key;
-  void (*func)(Seat *seat, Arg *arg);
-  Arg arg;
+    uint32_t mods;
+    xkb_keysym_t key;
+    void (*func)(Seat* seat, Arg* arg);
+    Arg arg;
 } Keys;
 
-void destroy_window(Seat *seat, Arg *arg);
-void focus_next_mon(Seat *seat, Arg *arg);
-void focus_prev_mon(Seat *seat, Arg *arg);
-void tag_next_mon(Seat *seat, Arg *arg);
-void tag_prev_mon(Seat *seat, Arg *arg);
-void exit_session(Seat *seat, Arg *arg);
-void focus_next(Seat *seat, Arg *arg);
-void focus_prev(Seat *esat, Arg *arg);
-void set_layout(Seat *seat, Arg *arg);
-void spawn(Seat *seat, Arg *arg);
-void view(Seat *seat, Arg *arg);
-void tag(Seat *seat, Arg *arg);
+void destroy_window(Seat* seat, Arg* arg);
+void focus_next_mon(Seat* seat, Arg* arg);
+void focus_prev_mon(Seat* seat, Arg* arg);
+void tag_next_mon(Seat* seat, Arg* arg);
+void tag_prev_mon(Seat* seat, Arg* arg);
+void exit_session(Seat* seat, Arg* arg);
+void focus_next(Seat* seat, Arg* arg);
+void focus_prev(Seat* esat, Arg* arg);
+void set_layout(Seat* seat, Arg* arg);
+void spawn(Seat* seat, Arg* arg);
+void view(Seat* seat, Arg* arg);
+void tag(Seat* seat, Arg* arg);
 
-Node *create_node(Tag *tag, Window *window, Node *parent);
-void insert_node(Window *window, Node *root, Node *ref);
-void remove_node(Node *node);
-void propogate_layout(Node *root);
+Node* create_node(Tag* tag, Window* window, Node* parent);
+void insert_node(Window* window, Node* root, Node* ref);
+void remove_node(Node* node);
+void propogate_layout(Node* root);
 
-void tile(Output *output);
-void monocle(Output *output);
+void tile(Output* output);
+void monocle(Output* output);
 
 #endif /* ANVLH */
