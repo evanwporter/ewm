@@ -26,7 +26,11 @@ $(BUILD_DIR)/%.c:
 $(BUILD_DIR):
 	mkdir $(BUILD_DIR)
 
-.PHONY: build
+compile_commands:
+	bear --output compile_commands.json -- make clean build
+
+.PHONY: build compile_commands
+
 build: $(BUILD_DIR) $(BUILD_DIR)/$(MAIN_FILE)
 
 .PHONY: clean

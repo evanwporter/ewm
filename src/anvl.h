@@ -5,14 +5,14 @@
 #include <wayland-client-protocol.h>
 
 #include <linux/input-event-codes.h>
-#include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include <xkbcommon/xkbcommon.h>
 
-#include <river-xkb-config-v1-client-protocol.h>
-#include <river-layer-shell-v1-client-protocol.h>
-#include <river-xkb-bindings-v1-client-protocol.h>
 #include <river-input-management-v1-client-protocol.h>
+#include <river-layer-shell-v1-client-protocol.h>
 #include <river-window-management-v1-client-protocol.h>
+#include <river-xkb-bindings-v1-client-protocol.h>
+#include <river-xkb-config-v1-client-protocol.h>
 
 #include <wlr-layer-shell-unstable-v1-client-protocol.h>
 
@@ -38,11 +38,7 @@ struct Window {
   Node *node;
 };
 
-typedef enum {
-  HORIZONTAL,
-  VERTICAL,
-  UNSET
-} split_type_t;
+typedef enum { HORIZONTAL, VERTICAL, UNSET } split_type_t;
 
 struct Node {
   split_type_t split_type;
@@ -88,7 +84,7 @@ struct Output {
   Tag *tags[9];
 };
 
-struct WlOutput{
+struct WlOutput {
   struct wl_output *wl_output;
   struct wl_list link;
 
@@ -124,7 +120,7 @@ typedef struct {
 
 struct Layout {
   char *symbol;
-  void (*manage)(Output*);
+  void (*manage)(Output *);
 };
 
 typedef union {
