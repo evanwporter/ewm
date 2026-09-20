@@ -204,6 +204,13 @@ void monocle(Output* output);
 void window_set_position(Window* window, int x, int y);
 void window_set_dimensions(Window* window, int width, int height);
 void manage_seat(Seat* seat);
+void anvl_add_window(Window* window);
+void anvl_remove_window(Window* window);
+void anvl_add_output(Output* output);
+void anvl_remove_output(Output* output);
+void anvl_output_position(Output* output, int x, int y);
+void anvl_output_dimensions(Output* output, int width, int height);
+void anvl_manage(void);
 bool set_font_scale(int scale);
 void render_bar(WlOutput* output);
 

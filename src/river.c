@@ -24,34 +24,7 @@ void river_output_v1_removed(void* data, struct river_output_v1* obj) {
 
     river_layer_shell_output_v1_destroy(output->river_layer_shell);
     river_output_v1_destroy(output->river_output);
-    wl_list_remove(&output->link);
-
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        Tag* tag = output->tags[i];
-
-        Node* queue[1 << 16];
-        uint32_t front = 0;
-        uint32_t back = 0;
-
-        queue[back++] = tag->root;
-
-        Node* n;
-        while (front != back) {
-            n = queue[front++];
-            if (n->first != NULL && n->second != NULL) {
-                queue[back++] = n->first;
-                queue[back++] = n->second;
-            } else if (n->window != NULL) {
-                n->window->node = NULL;
-            }
-
-            free(n);
-        }
-
-        free(tag);
-    }
-
-    free(output);
+    anvl_remove_output(output);
 }
 
 void river_output_v1_wl_output(void* data, struct river_output_v1* obj, uint32_t name) {
@@ -71,31 +44,13 @@ void river_output_v1_wl_output(void* data, struct river_output_v1* obj, uint32_t
 void river_output_v1_position(void* data, struct river_output_v1* obj, int32_t x, int32_t y) {
     Output* output = data;
 
-    output->x = x;
-    output->y = y;
-
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        Tag* tag = output->tags[i];
-
-        tag->root->x = x + gappx;
-        tag->root->y = y + (show_bar && top_bar ? barpx : 0) + gappx;
-    }
+    anvl_output_position(output, x, y);
 }
 
 void river_output_v1_dimensions(void* data, struct river_output_v1* obj, int32_t width, int32_t height) {
     Output* output = data;
 
-    output->width = width;
-    output->height = height;
-
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        Tag* tag = output->tags[i];
-
-        tag->root->width = width - 2 * gappx;
-        /* Keep an outer gap opposite the bar, but let tiled windows meet the bar
-         * instead of leaving a black seam at its edge. */
-        tag->root->height = height - (show_bar ? barpx : 0) - gappx;
-    }
+    anvl_output_dimensions(output, width, height);
 }
 
 const struct river_output_v1_listener output_listener = {
@@ -108,17 +63,9 @@ const struct river_output_v1_listener output_listener = {
 void river_window_v1_closed(void* data, struct river_window_v1* obj) {
     Window* window = data;
 
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) {
-        if (seat->focused == window) {
-            seat->focused = NULL;
-        }
-    }
-
-    remove_node(window->node);
+    anvl_remove_window(window);
 
     river_window_v1_destroy(window->river_window);
-    wl_list_remove(&window->link);
     free(window->title);
     free(window);
 }
@@ -341,29 +288,7 @@ void river_window_manager_v1_finished(void* data, struct river_window_manager_v1
 }
 
 void river_window_manager_v1_manage_start(void* data, struct river_window_manager_v1* obj) {
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
-
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        /* River only permits window-management requests between manage_start and
-         * manage_finish.  New windows are announced before this callback. */
-        river_window_v1_use_ssd(window->river_window);
-        river_window_v1_set_tiled(window->river_window, 15);
-        river_window_v1_hide(window->river_window);
-    }
-
-    Tag* tag;
-    Output* output;
-    wl_list_for_each(output, &anvl.outputs, link) {
-        for (int i = 0; i < LENGTH(output->tags); i++) {
-            tag = output->tags[i];
-            propogate_layout(tag->root);
-        }
-
-        tag = output->tags[output->seltag];
-        tag->lt->manage(output);
-    }
+    anvl_manage();
 
     river_window_manager_v1_manage_finish(window_manager);
 }
@@ -425,46 +350,20 @@ void river_window_manager_v1_window(void* data, struct river_window_manager_v1* 
     window->river_window = river_window;
     window->river_node = river_window_v1_get_node(window->river_window);
 
-    Tag* tag = selmon->tags[selmon->seltag]; // TODO: Maybe reconsider using
-                                             // selmon in general
-    Node* root = tag->root;
-    Node* focused = tag->focused;
-
-    insert_node(window, root, focused);
-
     river_window_v1_add_listener(window->river_window, &window_listener, window);
-    wl_list_insert(&anvl.windows, &window->link);
-
-    // Focus new window on all seats
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) { seat->focused = window; }
+    anvl_add_window(window);
 }
 
 void river_window_manager_v1_output(void* data, struct river_window_manager_v1* obj, struct river_output_v1* river_output) {
     Output* output = calloc(1, sizeof(Output));
     output->river_output = river_output;
     output->river_layer_shell = river_layer_shell_v1_get_output(layer_shell, river_output);
-    output->seltag = 0;
-
-    for (int i = 0; i < LENGTH(tags); i++) {
-        Tag* tag = calloc(1, sizeof(Tag));
-        tag->n = i;
-        tag->sym = tags[i];
-        tag->root = create_node(tag, NULL, NULL);
-        tag->focused = NULL;
-        tag->lt = &layouts[0];
-        output->tags[i] = tag;
-    }
-
     river_output_v1_add_listener(output->river_output, &output_listener, output);
     river_layer_shell_output_v1_add_listener(
         output->river_layer_shell, &layer_shell_output_listener, output);
-    wl_list_insert(&anvl.outputs, &output->link);
-
-    if (selmon == NULL) {
-        selmon = output;
+    anvl_add_output(output);
+    if (selmon == output)
         river_layer_shell_output_v1_set_default(output->river_layer_shell);
-    }
 }
 
 void river_window_manager_v1_seat(void* data, struct river_window_manager_v1* obj, struct river_seat_v1* river_seat) {

@@ -256,6 +256,104 @@ void propogate_layout(Node* root) {
 // Used for dragging
 // Used for dragging
 
+void anvl_add_window(Window* window) {
+    Tag* tag = selmon->tags[selmon->seltag];
+
+    insert_node(window, tag->root, tag->focused);
+    wl_list_insert(&anvl.windows, &window->link);
+
+    Seat* seat;
+    wl_list_for_each(seat, &anvl.seats, link) { seat->focused = window; }
+}
+
+void anvl_remove_window(Window* window) {
+    Seat* seat;
+    wl_list_for_each(seat, &anvl.seats, link) {
+        if (seat->focused == window)
+            seat->focused = NULL;
+    }
+
+    remove_node(window->node);
+    wl_list_remove(&window->link);
+}
+
+void anvl_add_output(Output* output) {
+    output->seltag = 0;
+    for (int i = 0; i < LENGTH(tags); i++) {
+        Tag* tag = calloc(1, sizeof(Tag));
+        tag->n = i;
+        tag->sym = tags[i];
+        tag->root = create_node(tag, NULL, NULL);
+        tag->lt = &layouts[0];
+        output->tags[i] = tag;
+    }
+
+    wl_list_insert(&anvl.outputs, &output->link);
+    if (selmon == NULL)
+        selmon = output;
+}
+
+void anvl_remove_output(Output* output) {
+    wl_list_remove(&output->link);
+    for (int i = 0; i < LENGTH(output->tags); i++) {
+        Tag* tag = output->tags[i];
+        Node* queue[1 << 16];
+        uint32_t front = 0, back = 0;
+        queue[back++] = tag->root;
+        while (front != back) {
+            Node* node = queue[front++];
+            if (node->first != NULL && node->second != NULL) {
+                queue[back++] = node->first;
+                queue[back++] = node->second;
+            } else if (node->window != NULL) {
+                node->window->node = NULL;
+            }
+            free(node);
+        }
+        free(tag);
+    }
+    if (selmon == output)
+        selmon = NULL;
+    free(output);
+}
+
+void anvl_output_position(Output* output, int x, int y) {
+    output->x = x;
+    output->y = y;
+    for (int i = 0; i < LENGTH(output->tags); i++) {
+        output->tags[i]->root->x = x + gappx;
+        output->tags[i]->root->y = y + (show_bar && top_bar ? barpx : 0) + gappx;
+    }
+}
+
+void anvl_output_dimensions(Output* output, int width, int height) {
+    output->width = width;
+    output->height = height;
+    for (int i = 0; i < LENGTH(output->tags); i++) {
+        output->tags[i]->root->width = width - 2 * gappx;
+        output->tags[i]->root->height = height - (show_bar ? barpx : 0) - gappx;
+    }
+}
+
+void anvl_manage(void) {
+    Seat* seat;
+    wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
+
+    Window* window;
+    wl_list_for_each(window, &anvl.windows, link) {
+        river_window_v1_use_ssd(window->river_window);
+        river_window_v1_set_tiled(window->river_window, 15);
+        river_window_v1_hide(window->river_window);
+    }
+
+    Output* output;
+    wl_list_for_each(output, &anvl.outputs, link) {
+        for (int i = 0; i < LENGTH(output->tags); i++)
+            propogate_layout(output->tags[i]->root);
+        output->tags[output->seltag]->lt->manage(output);
+    }
+}
+
 void manage_seat(Seat* seat) {
     if (seat->focused == NULL && !wl_list_empty(&anvl.windows)) {
         seat->focused = wl_container_of(anvl.windows.prev, seat->focused, link);
