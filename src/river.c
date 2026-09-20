@@ -13,11 +13,34 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "anvl.h"
+#include "bar.h"
 #include "config.h"
+#include "river.h"
 
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
+
+static struct wl_shm* shm;
+static struct wl_compositor* compositor;
+static struct zwlr_layer_shell_v1* zwlr_layer_shell;
+static struct xkb_context* xkb_context;
+static struct river_xkb_config_v1* xkb_config;
+static struct river_xkb_keymap_v1* xkb_keymap;
+static struct river_layer_shell_v1* layer_shell;
+static struct river_xkb_bindings_v1* xkb_bindings;
+static struct river_input_manager_v1* input_manager;
+static struct river_window_manager_v1* window_manager;
+
+bool river_init(void) {
+    xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    return xkb_context != NULL;
+}
+
+bool river_supported(void) {
+    return window_manager != NULL && xkb_bindings != NULL;
+}
+
+struct wl_shm* river_shm(void) { return shm; }
 
 void river_output_v1_removed(void* data, struct river_output_v1* obj) {
     Output* output = data;
@@ -121,17 +144,38 @@ const struct river_window_v1_listener window_listener = {
     .identifier = river_window_v1_identifier,
 };
 
-void window_set_position(Window* window, int x, int y) {
+void river_window_move(Window* window, int x, int y) {
     window->x = x;
     window->y = y;
     river_node_v1_set_position(window->river_node, window->x, window->y);
 }
 
-void window_set_dimensions(Window* window, int width, int height) {
+void river_window_resize(Window* window, int width, int height) {
     window->width = width;
     window->height = height;
     river_window_v1_propose_dimensions(window->river_window, window->width, window->height);
 }
+
+void river_window_close(Window* window) { river_window_v1_close(window->river_window); }
+void river_window_show(Window* window) { river_window_v1_show(window->river_window); }
+void river_window_hide(Window* window) { river_window_v1_hide(window->river_window); }
+void river_window_prepare(Window* window) {
+    river_window_v1_use_ssd(window->river_window);
+    river_window_v1_set_tiled(window->river_window, 15);
+    river_window_hide(window);
+}
+void river_focus_window(Seat* seat, Window* window) {
+    river_seat_v1_focus_window(seat->river_seat, window->river_window);
+}
+void river_clear_focus(Seat* seat) { river_seat_v1_clear_focus(seat->river_seat); }
+void river_raise_window(Window* window) { river_node_v1_place_top(window->river_node); }
+void river_pointer_warp(Seat* seat, int x, int y) {
+    river_seat_v1_pointer_warp(seat->river_seat, x, y);
+}
+void river_select_output(Output* output) {
+    river_layer_shell_output_v1_set_default(output->river_layer_shell);
+}
+void river_exit_session(void) { river_window_manager_v1_exit_session(window_manager); }
 
 void river_xkb_binding_v1_pressed(void* data, struct river_xkb_binding_v1* obj) {
     Key* key = data;

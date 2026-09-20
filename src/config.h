@@ -1,4 +1,6 @@
 #include "anvl.h"
+#include <river-window-management-v1-client-protocol.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 
 static const unsigned int gappx = 4; // 0 to disable gap
 static const bool show_bar = true;
@@ -26,10 +28,21 @@ static Layout layouts[] = {
 
 static const char* termcmd[] = { "kitty", NULL };
 static const char* reloadcmd[] = { "sh", "-c", "pkill -x anvl; exec anvl", NULL };
+static const char* menucmd[] = {
+    "bemenu-run",
+    "-l",
+    "10",
+    "-p",
+    "Run:",
+    "--fn",
+    "JetBrainsMonoNL NFP 13",
+    NULL
+};
 
 static Keys keybinds[] = {
     { SUPER, XKB_KEY_Return, spawn, { .v = termcmd } },
     { SUPER | SHIFT, XKB_KEY_c, spawn, { .v = reloadcmd } },
+    { SUPER, XKB_KEY_space, spawn, { .v = menucmd } },
     { SUPER, XKB_KEY_t, set_layout, { .v = &layouts[0] } },
     { SUPER, XKB_KEY_m, set_layout, { .v = &layouts[1] } },
     { SUPER, XKB_KEY_q, destroy_window, { 0 } },

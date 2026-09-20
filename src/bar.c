@@ -25,6 +25,7 @@
 
 #include "anvl.h"
 #include "config.h"
+#include "river.h"
 
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
@@ -260,7 +261,7 @@ void render_bar(WlOutput* output) {
     int fd = allocate_shm_file(shm_pool_size);
     uint8_t* pool_data = mmap(NULL, shm_pool_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
-    struct wl_shm_pool* pool = wl_shm_create_pool(shm, fd, shm_pool_size);
+    struct wl_shm_pool* pool = wl_shm_create_pool(river_shm(), fd, shm_pool_size);
     struct wl_buffer* buf = wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_ARGB8888);
 
     pixman_image_t* pix = NULL;

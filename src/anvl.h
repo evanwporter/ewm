@@ -8,13 +8,14 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
-#include <river-input-management-v1-client-protocol.h>
-#include <river-layer-shell-v1-client-protocol.h>
-#include <river-window-management-v1-client-protocol.h>
-#include <river-xkb-bindings-v1-client-protocol.h>
-#include <river-xkb-config-v1-client-protocol.h>
-
-#include <wlr-layer-shell-unstable-v1-client-protocol.h>
+struct river_window_v1;
+struct river_node_v1;
+struct river_output_v1;
+struct river_layer_shell_output_v1;
+struct river_seat_v1;
+struct river_xkb_binding_v1;
+struct river_pointer_binding_v1;
+struct zwlr_layer_surface_v1;
 
 typedef struct WlOutput WlOutput;
 typedef struct Window Window;
@@ -161,19 +162,6 @@ typedef struct {
 extern WindowManager anvl;
 extern Output* selmon;
 
-extern struct fcft_font* fcft_font;
-
-extern struct wl_shm* shm;
-extern struct wl_compositor* compositor;
-extern struct zwlr_layer_shell_v1* zwlr_layer_shell;
-extern struct xkb_context* xkb_context;
-extern struct river_xkb_config_v1* xkb_config;
-extern struct river_xkb_keymap_v1* xkb_keymap;
-extern struct river_layer_shell_v1* layer_shell;
-extern struct river_xkb_bindings_v1* xkb_bindings;
-extern struct river_input_manager_v1* input_manager;
-extern struct river_window_manager_v1* window_manager;
-
 typedef struct {
     uint32_t mods;
     xkb_keysym_t key;
@@ -201,8 +189,6 @@ void propogate_layout(Node* root);
 
 void tile(Output* output);
 void monocle(Output* output);
-void window_set_position(Window* window, int x, int y);
-void window_set_dimensions(Window* window, int width, int height);
 void manage_seat(Seat* seat);
 void anvl_add_window(Window* window);
 void anvl_remove_window(Window* window);
@@ -211,9 +197,5 @@ void anvl_remove_output(Output* output);
 void anvl_output_position(Output* output, int x, int y);
 void anvl_output_dimensions(Output* output, int width, int height);
 void anvl_manage(void);
-bool set_font_scale(int scale);
-void render_bar(WlOutput* output);
-
-extern const struct wl_registry_listener registry_listener;
 
 #endif /* ANVLH */

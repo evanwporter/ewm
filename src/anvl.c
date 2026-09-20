@@ -22,7 +22,9 @@
 #include <fcft/fcft.h>
 
 #include "anvl.h"
+#include "bar.h"
 #include "config.h"
+#include "river.h"
 
 #define MIN(A, B) (A < B ? A : B)
 #define MAX(A, B) (A > B ? A : B)
@@ -33,21 +35,9 @@
 WindowManager anvl;
 Output* selmon = NULL;
 
-struct wl_shm* shm;
-struct wl_compositor* compositor;
-struct zwlr_layer_shell_v1* zwlr_layer_shell;
-
-struct xkb_context* xkb_context;
-struct river_xkb_config_v1* xkb_config;
-struct river_xkb_keymap_v1* xkb_keymap;
-struct river_layer_shell_v1* layer_shell;
-struct river_xkb_bindings_v1* xkb_bindings;
-struct river_input_manager_v1* input_manager;
-struct river_window_manager_v1* window_manager;
-
 void destroy_window(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
-        river_window_v1_close(seat->focused->river_window);
+        river_window_close(seat->focused);
     }
 }
 
@@ -56,8 +46,8 @@ void focus_next_mon(Seat* seat, Arg* arg) {
         Output* next = wl_container_of(selmon->link.next, selmon, link);
         if (next != NULL && &next->link != &anvl.outputs) {
             selmon = next;
-            river_layer_shell_output_v1_set_default(selmon->river_layer_shell);
-            river_seat_v1_pointer_warp(seat->river_seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
+            river_select_output(selmon);
+            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
         }
     }
 }
@@ -67,8 +57,8 @@ void focus_prev_mon(Seat* seat, Arg* arg) {
         Output* prev = wl_container_of(selmon->link.prev, selmon, link);
         if (prev != NULL && &prev->link != &anvl.outputs) {
             selmon = prev;
-            river_layer_shell_output_v1_set_default(selmon->river_layer_shell);
-            river_seat_v1_pointer_warp(seat->river_seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
+            river_select_output(selmon);
+            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
         }
     }
 }
@@ -94,7 +84,7 @@ void tag_prev_mon(Seat* seat, Arg* arg) {
 }
 
 void exit_session(Seat* seat, Arg* arg) {
-    river_window_manager_v1_exit_session(window_manager);
+    river_exit_session();
 }
 
 void set_layout(Seat* seat, Arg* arg) {
@@ -109,7 +99,7 @@ void focus_next(Seat* seat, Arg* arg) {
         Window* next = wl_container_of(seat->focused->link.next, seat->focused, link);
         if (next != NULL && &next->link != &anvl.windows) {
             seat->focused = next;
-            river_seat_v1_pointer_warp(seat->river_seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
+            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
         }
     }
 }
@@ -120,7 +110,7 @@ void focus_prev(Seat* seat, Arg* arg) {
         Window* prev = wl_container_of(seat->focused->link.prev, seat->focused, link);
         if (prev != NULL && &prev->link != &anvl.windows) {
             seat->focused = prev;
-            river_seat_v1_pointer_warp(seat->river_seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
+            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
         }
     }
 }
@@ -341,9 +331,7 @@ void anvl_manage(void) {
 
     Window* window;
     wl_list_for_each(window, &anvl.windows, link) {
-        river_window_v1_use_ssd(window->river_window);
-        river_window_v1_set_tiled(window->river_window, 15);
-        river_window_v1_hide(window->river_window);
+        river_window_prepare(window);
     }
 
     Output* output;
@@ -360,11 +348,11 @@ void manage_seat(Seat* seat) {
     }
 
     if (seat->focused != NULL) {
-        river_seat_v1_focus_window(seat->river_seat, seat->focused->river_window);
-        river_node_v1_place_top(seat->focused->river_node);
+        river_focus_window(seat, seat->focused);
+        river_raise_window(seat->focused);
         seat->focused->node->tag->focused = seat->focused->node;
     } else {
-        river_seat_v1_clear_focus(seat->river_seat);
+        river_clear_focus(seat);
     }
 }
 
@@ -382,9 +370,9 @@ void tile(Output* output) {
             queue[back++] = n->first;
             queue[back++] = n->second;
         } else if (n->window != NULL) {
-            river_window_v1_show(n->window->river_window);
-            window_set_dimensions(n->window, n->window->node->width, n->window->node->height);
-            window_set_position(n->window, n->window->node->x, n->window->node->y);
+            river_window_show(n->window);
+            river_window_resize(n->window, n->window->node->width, n->window->node->height);
+            river_window_move(n->window, n->window->node->x, n->window->node->y);
         }
     }
 }
@@ -403,9 +391,9 @@ void monocle(Output* output) {
             queue[back++] = n->first;
             queue[back++] = n->second;
         } else if (n->window != NULL) {
-            river_window_v1_show(n->window->river_window);
-            window_set_position(n->window, output->x, output->y + (show_bar && top_bar ? barpx : 0));
-            window_set_dimensions(n->window, output->width, output->height - (show_bar ? barpx : 0));
+            river_window_show(n->window);
+            river_window_move(n->window, output->x, output->y + (show_bar && top_bar ? barpx : 0));
+            river_window_resize(n->window, output->width, output->height - (show_bar ? barpx : 0));
         }
     }
 }
@@ -419,7 +407,8 @@ void monocle(Output* output) {
 // credit to
 // https://git.sr.ht/~zuki/zrwm/tree/afc021dd91bba7a69b1f10fbbf8c5d7bfd66490a/item/zrwm.c#L636
 int main() {
-    xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!river_init())
+        return 1;
 
     struct wl_display* display = wl_display_connect(NULL);
     if (display == NULL) {
@@ -447,7 +436,7 @@ int main() {
         return 1;
     }
 
-    if (window_manager == NULL || xkb_bindings == NULL) {
+    if (!river_supported()) {
         fprintf(stderr, "river_window_manager_v1 or river_xkb_bindings_v1 not "
                         "supported by the Wayland server\n");
         return 1;
