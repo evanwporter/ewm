@@ -94,6 +94,7 @@ struct WlOutput {
 
   int width;
   int height;
+  int scale;
 
   bool done;
   bool configured;

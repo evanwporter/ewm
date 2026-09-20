@@ -12,10 +12,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -38,6 +41,7 @@ struct wl_compositor *compositor;
 struct zwlr_layer_shell_v1 *zwlr_layer_shell;
 
 struct fcft_font *fcft_font = NULL;
+static int fcft_font_scale = 0;
 
 struct xkb_context *xkb_context;
 struct river_xkb_config_v1 *xkb_config;
@@ -48,6 +52,111 @@ struct river_input_manager_v1 *input_manager;
 struct river_window_manager_v1 *window_manager;
 
 void render_bar(WlOutput *output);
+
+static bool set_font_scale(int scale) {
+  if (scale == fcft_font_scale)
+    return true;
+
+  char attributes[32];
+  snprintf(attributes, sizeof(attributes), "pixelsize=%d", fontpx * scale);
+  const char *names[] = {font};
+  struct fcft_font *scaled_font = fcft_from_name2(1, names, attributes, NULL);
+  if (scaled_font == NULL) {
+    fprintf(stderr, "font failed at scale %d\n", scale);
+    return false;
+  }
+
+  if (fcft_font != NULL)
+    fcft_destroy(fcft_font);
+  fcft_font = scaled_font;
+  fcft_font_scale = scale;
+  return true;
+}
+
+static bool read_line(const char *path, char *buf, size_t size) {
+  FILE *file = fopen(path, "r");
+  if (file == NULL)
+    return false;
+
+  bool ok = fgets(buf, size, file) != NULL;
+  fclose(file);
+  if (ok)
+    buf[strcspn(buf, "\n")] = '\0';
+  return ok;
+}
+
+static void wifi_status(char *buf, size_t size) {
+  DIR *net = opendir("/sys/class/net");
+  if (net == NULL) {
+    snprintf(buf, size, "Wi-Fi: ?");
+    return;
+  }
+
+  bool found = false;
+  bool connected = false;
+  struct dirent *entry;
+  while ((entry = readdir(net)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+
+    char path[PATH_MAX];
+    struct stat st;
+    snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", entry->d_name);
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+      continue;
+
+    found = true;
+    snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", entry->d_name);
+    char state[16];
+    if (read_line(path, state, sizeof(state)) && strcmp(state, "up") == 0) {
+      connected = true;
+      break;
+    }
+  }
+  closedir(net);
+
+  snprintf(buf, size, "Wi-Fi: %s", !found ? "n/a" : connected ? "on" : "off");
+}
+
+static void battery_status(char *buf, size_t size) {
+  DIR *power = opendir("/sys/class/power_supply");
+  if (power == NULL) {
+    snprintf(buf, size, "Bat: n/a");
+    return;
+  }
+
+  struct dirent *entry;
+  while ((entry = readdir(power)) != NULL) {
+    if (strncmp(entry->d_name, "BAT", 3) != 0)
+      continue;
+
+    char path[PATH_MAX], capacity[16];
+    snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity",
+             entry->d_name);
+    if (read_line(path, capacity, sizeof(capacity))) {
+      snprintf(buf, size, "Bat: %d%%", atoi(capacity));
+      closedir(power);
+      return;
+    }
+  }
+  closedir(power);
+  snprintf(buf, size, "Bat: n/a");
+}
+
+static void format_status(char *buf, size_t size) {
+  char wifi[24], battery[24], clock[64];
+  wifi_status(wifi, sizeof(wifi));
+  battery_status(battery, sizeof(battery));
+
+  time_t now = time(NULL);
+  struct tm local_time;
+  if (localtime_r(&now, &local_time) == NULL)
+    snprintf(clock, sizeof(clock), "time: ?");
+  else
+    strftime(clock, sizeof(clock), status_time_format, &local_time);
+
+  snprintf(buf, size, "%s  |  %s  |  %s", wifi, battery, clock);
+}
 
 void destroy_window(Seat *seat, Arg *arg) {
   if (seat->focused != NULL) {
@@ -348,7 +457,9 @@ void river_output_v1_dimensions(void *data, struct river_output_v1 *obj,
     Tag *tag = output->tags[i];
 
     tag->root->width = width - 2 * gappx;
-    tag->root->height = height - (show_bar ? barpx : 0) - 2 * gappx;
+    /* Keep an outer gap opposite the bar, but let tiled windows meet the bar
+     * instead of leaving a black seam at its edge. */
+    tag->root->height = height - (show_bar ? barpx : 0) - gappx;
   }
 }
 
@@ -791,7 +902,7 @@ void render_chars(const char *chars, size_t len, int x, int y, int width,
 
   for (size_t i = 0; i < len; i++) {
     glyphs[i] =
-        fcft_rasterize_char_utf32(fcft_font, chars[i], FCFT_SUBPIXEL_DEFAULT);
+        fcft_rasterize_char_utf32(fcft_font, chars[i], FCFT_SUBPIXEL_NONE);
     if (glyphs[i] == NULL)
       continue;
 
@@ -825,7 +936,7 @@ int text_width(const char *text) {
 
   for (size_t i = 0; text[i] != '\0'; i++) {
     const struct fcft_glyph *glyph =
-        fcft_rasterize_char_utf32(fcft_font, text[i], FCFT_SUBPIXEL_DEFAULT);
+        fcft_rasterize_char_utf32(fcft_font, text[i], FCFT_SUBPIXEL_NONE);
     if (glyph != NULL)
       width += glyph->advance.x;
   }
@@ -846,7 +957,13 @@ void render_bar(WlOutput *output) {
 
   if (!output->done)
     return;
-  int w = output->width, h = barpx;
+  int scale = output->scale;
+  if (!set_font_scale(scale))
+    return;
+
+  /* Layer-shell configure dimensions are logical.  Back the surface with a
+   * native-resolution buffer so the compositor does not upscale bar text. */
+  int w = output->width * scale, h = barpx * scale;
 
   uint32_t stride = w * 4;
   int shm_pool_size = h * stride;
@@ -901,9 +1018,8 @@ void render_bar(WlOutput *output) {
     textw = text_width(tags[i]) + h;
     bool selected = i == output->output->seltag;
     if (selected)
-      pixman_image_fill_rectangles(
-          PIXMAN_OP_SRC, pix, &selbg, 1,
-          (pixman_rectangle16_t[]){{x, 0, textw, h}});
+      pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &selbg, 1,
+                                   (pixman_rectangle16_t[]){{x, 0, textw, h}});
     render_chars(tags[i], strlen(tags[i]), x, y, textw, &cx, pix,
                  selected ? sel_fg : fg);
     x += textw;
@@ -925,18 +1041,14 @@ void render_bar(WlOutput *output) {
       n++;
   }
 
-  time_t rawtime;
-  struct tm *timeinfo;
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-
-  char status[32];
-  int status_len = strftime(status, sizeof(status), "%a, %d %b %H:%M:%S",
-                            timeinfo);
+  char status[128];
+  format_status(status, sizeof(status));
+  int status_len = strlen(status);
   int statusw = text_width(status) + h;
 
   /* Draw status first so it can be overdrawn by tags later. This follows
-   * dwm's drawbar() ordering and reserves its rightmost space for the status. */
+   * dwm's drawbar() ordering and reserves its rightmost space for the status.
+   */
   if (output->output == selmon)
     render_chars(status, status_len, w - h / 2, y, 0, &rx, pix, fg);
   else
@@ -974,7 +1086,8 @@ void render_bar(WlOutput *output) {
   pixman_image_unref(fg);
 
   wl_surface_attach(output->surface, buf, 0, 0);
-  wl_surface_damage(output->surface, 0, 0, w, h);
+  wl_surface_set_buffer_scale(output->surface, scale);
+  wl_surface_damage(output->surface, 0, 0, output->width, barpx);
   wl_surface_commit(output->surface);
 
   wl_shm_pool_destroy(pool);
@@ -1324,11 +1437,10 @@ void wl_output_done(void *data, struct wl_output *wl_output) {
    * made the bar too wide on scaled outputs. */
   zwlr_layer_surface_v1_set_size(output->layer_surface, 0, barpx);
   zwlr_layer_surface_v1_set_anchor(
-      output->layer_surface,
-      (top_bar ? ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
-               : ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) |
-          ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-          ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+      output->layer_surface, (top_bar ? ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
+                                      : ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) |
+                                 ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+                                 ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
   zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
 
   zwlr_layer_surface_v1_add_listener(output->layer_surface,
@@ -1339,7 +1451,10 @@ void wl_output_done(void *data, struct wl_output *wl_output) {
   wl_callback_add_listener(cb, &wl_surface_frame_listener, output);
 }
 
-void wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor) {}
+void wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor) {
+  WlOutput *output = data;
+  output->scale = MAX(factor, 1);
+}
 void wl_output_name(void *data, struct wl_output *wl_output, const char *name) {
 }
 void wl_output_description(void *data, struct wl_output *wl_output,
@@ -1395,6 +1510,7 @@ void wl_registry_global(void *data, struct wl_registry *registry, uint32_t name,
 
   if (strcmp(interface, wl_output_interface.name) == 0) {
     WlOutput *output = calloc(1, sizeof(WlOutput));
+    output->scale = 1;
     output->done = false;
     output->configured = false;
     output->name = name;
@@ -1449,12 +1565,8 @@ int main() {
   wl_list_init(&anvl.outputs);
   wl_list_init(&anvl.seats);
 
-  const char *name[] = {font};
   fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_DEBUG);
-  fcft_font = fcft_from_name2(1, name, NULL, NULL);
-
-  if (fcft_font == NULL) {
-    fprintf(stderr, "font failed\n");
+  if (!set_font_scale(1)) {
     return 1;
   }
 

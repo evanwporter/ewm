@@ -4,7 +4,9 @@ static const unsigned int gappx = 4; // 0 to disable gap
 static const bool show_bar = true;
 static const int barpx = 24;
 static const bool top_bar = false; // 0 means bottom bar
-static const char *font = "JetBrainsMonoNL NFP:size=13:style=Bold";
+static const char *font = "JetBrainsMonoNL NFP:style=Regular";
+static const int fontpx = 13;
+static const char *status_time_format = "%a, %d %b %H:%M";
 static const char *kb_layout = "us";
 
 static const char *tags[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
