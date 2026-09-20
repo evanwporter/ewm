@@ -36,4 +36,3 @@ build: $(BUILD_DIR) $(BUILD_DIR)/$(MAIN_FILE)
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
-

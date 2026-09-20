@@ -47,6 +47,8 @@ struct river_xkb_bindings_v1 *xkb_bindings;
 struct river_input_manager_v1 *input_manager;
 struct river_window_manager_v1 *window_manager;
 
+void render_bar(WlOutput *output);
+
 void destroy_window(Seat *seat, Arg *arg) {
   if (seat->focused != NULL) {
     river_window_v1_close(seat->focused->river_window);
@@ -314,6 +316,8 @@ void river_output_v1_wl_output(void *data, struct river_output_v1 *obj,
     if (wl_output->name == name) {
       wl_output->output = output;
       wl_output->done = true;
+      if (wl_output->configured)
+        render_bar(wl_output);
     }
   }
 }
@@ -693,6 +697,10 @@ void river_window_manager_v1_manage_start(void *data,
 
   Window *window;
   wl_list_for_each(window, &anvl.windows, link) {
+    /* River only permits window-management requests between manage_start and
+     * manage_finish.  New windows are announced before this callback. */
+    river_window_v1_use_ssd(window->river_window);
+    river_window_v1_set_tiled(window->river_window, 15);
     river_window_v1_hide(window->river_window);
   }
 
@@ -804,6 +812,11 @@ void render_chars(const char *chars, size_t len, int x, int y, int width,
 }
 
 void render_bar(WlOutput *output) {
+  /* A layer surface must receive and acknowledge its first configure before
+   * it is committed.  Output discovery can arrive in either order. */
+  if (!output->configured)
+    return;
+
   if (!show_bar) {
     wl_surface_commit(output->surface);
     return;
@@ -918,6 +931,7 @@ void zwlr_layer_surface_v1_configure(
 
   output->width = width;
   output->height = height;
+  output->configured = true;
   if (output->done)
     render_bar(output);
 }
@@ -951,12 +965,6 @@ void river_window_manager_v1_window(void *data,
 
   river_window_v1_add_listener(window->river_window, &window_listener, window);
   wl_list_insert(&anvl.windows, &window->link);
-
-  river_window_v1_use_ssd(window->river_window);
-  river_window_v1_set_tiled(window->river_window, 15);
-
-  window_set_position(window, 0, 0);
-  window_set_dimensions(window, 0, 0);
 
   // Focus new window on all seats
   Seat *seat;
@@ -1291,6 +1299,7 @@ void wl_registry_global(void *data, struct wl_registry *registry, uint32_t name,
   if (strcmp(interface, wl_output_interface.name) == 0) {
     WlOutput *output = calloc(1, sizeof(WlOutput));
     output->done = false;
+    output->configured = false;
     output->name = name;
     output->wl_output =
         wl_registry_bind(registry, name, &wl_output_interface, 4);

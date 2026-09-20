@@ -21,14 +21,16 @@ static Layout layouts[] = {
 #define TAGKEY(KEY, TAG)                                                       \
   {SUPER, KEY, view, {.u = TAG}}, {SUPER | SHIFT, KEY, tag, {.u = TAG}},
 
-static const char *termcmd[] = {"foot", NULL};
+static const char *termcmd[] = {"kitty", NULL};
+static const char *reloadcmd[] = {"sh", "-c", "pkill -x anvl; exec anvl", NULL};
 
 static Keys keybinds[] = {
-    {SUPER | SHIFT, XKB_KEY_Return, spawn, {.v = termcmd}},
+    {SUPER, XKB_KEY_Return, spawn, {.v = termcmd}},
+    {SUPER | SHIFT, XKB_KEY_c, spawn, {.v = reloadcmd}},
     {SUPER, XKB_KEY_t, set_layout, {.v = &layouts[0]}},
     {SUPER, XKB_KEY_m, set_layout, {.v = &layouts[1]}},
-    {SUPER | CONTROL, XKB_KEY_c, destroy_window, {0}},
-    {SUPER | SHIFT, XKB_KEY_q, exit_session, {0}},
+    {SUPER, XKB_KEY_q, destroy_window, {0}},
+    {SUPER | SHIFT, XKB_KEY_e, exit_session, {0}},
     {SUPER, XKB_KEY_j, focus_next, {0}},
     {SUPER, XKB_KEY_k, focus_prev, {0}},
     {SUPER, XKB_KEY_period, focus_next_mon, {0}},

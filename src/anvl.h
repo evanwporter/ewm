@@ -94,6 +94,7 @@ struct WlOutput {
   int height;
 
   bool done;
+  bool configured;
   uint32_t name;
 
   struct wl_surface *surface;
