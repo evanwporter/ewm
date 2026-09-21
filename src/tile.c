@@ -5,7 +5,7 @@
 #define MIN(A, B) (A < B ? A : B)
 
 static bool isvisible(const Client* client, const Output* output) {
-    return client->mon == output && client->workspace == output->selected_workspaces[output->sel_ws];
+    return client->mon == output && client->workspace == output->selected_workspace;
 }
 
 /// This handles the DWM-style master/stack tile arrangement.
@@ -19,7 +19,7 @@ void tile(Output* output) {
      *    ty - calculated stack-area y position relative to the window area
      */
     unsigned int i, n, h, mw, my, ty;
-    Workspace* workspace = output->tags[output->seltag];
+    Workspace* workspace = SELECTED_WORKSPACE(output);
     Client* client;
 
     // Sets n to the number of visible clients on this output and workspace.

@@ -295,22 +295,22 @@ void render_bar(WlOutput* output) {
             occ |= 1U << (window->workspace - 1);
     }
 
-    /* We start by looping through all tags. Do not draw vacant tags, except for
+    /* We start by looping through all workspaces. Do not draw vacant workspaces, except for
      * the selected one. This is the same rule as dwm's drawbar(). */
-    for (i = 0; i < LENGTH(tags); i++) {
-        if (!(occ & (1U << i) || i == output->output->seltag))
+    for (i = 0; i < LENGTH(workspace_names); i++) {
+        if (!(occ & (1U << i) || i == output->output->selected_workspace - 1))
             continue;
 
-        textw = text_width(tags[i]) + h;
-        bool selected = i == output->output->seltag;
+        textw = text_width(workspace_names[i]) + h;
+        bool selected = i == output->output->selected_workspace - 1;
         if (selected)
             pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, &selbg, 1, (pixman_rectangle16_t[]) { { x, 0, textw, h } });
-        render_chars(tags[i], strlen(tags[i]), x, y, textw, &cx, pix, selected ? sel_fg : fg);
+        render_chars(workspace_names[i], strlen(workspace_names[i]), x, y, textw, &cx, pix, selected ? sel_fg : fg);
         x += textw;
     }
 
     /* Just draw the layout symbol. */
-    const char* symbol = output->output->tags[output->output->seltag]->lt->symbol;
+    const char* symbol = SELECTED_WORKSPACE(output->output)->lt->symbol;
     textw = text_width(symbol) + h;
     render_chars(symbol, strlen(symbol), x, y, textw, &cx, pix, fg);
     x += textw;
@@ -320,7 +320,7 @@ void render_bar(WlOutput* output) {
      * of the title portion of dwm's bar. */
     int n = 0;
     wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon == output->output && window->workspace == output->output->seltag + 1)
+        if (window->mon == output->output && window->workspace == output->output->selected_workspace)
             n++;
     }
 
@@ -329,7 +329,7 @@ void render_bar(WlOutput* output) {
     int status_len = strlen(status);
     int statusw = text_width(status) + h;
 
-    /* Draw status first so it can be overdrawn by tags later. This follows
+    /* Draw status first so it can be overdrawn by workspaces later. This follows
      * dwm's drawbar() ordering and reserves its rightmost space for the status.
      */
     if (output->output == selmon)
@@ -341,7 +341,7 @@ void render_bar(WlOutput* output) {
         int remainder = textw % n;
         int tabw = textw / n;
         wl_list_for_each_reverse(window, &anvl.windows, link) {
-            if (window->mon != output->output || window->workspace != output->output->seltag + 1)
+            if (window->mon != output->output || window->workspace != output->output->selected_workspace)
                 continue;
 
             int tab_width = tabw + (remainder-- > 0 ? 1 : 0);

@@ -9,7 +9,7 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
-#define PERWS(M) (M->workspaces[(M)->selected_workspaces[(M)->sel_ws] - 1])
+#define SELECTED_WORKSPACE(M) ((M)->workspaces[(M)->selected_workspace - 1])
 
 struct river_window_v1;
 struct river_node_v1;
@@ -109,7 +109,7 @@ struct Node {
     Node* second;
     Node* parent;
 
-    Workspace* tag;
+    Workspace* workspace;
 };
 
 struct Workspace {
@@ -176,8 +176,6 @@ struct Workspace {
     /* Internal flag indicating whether the bar is shown at the top or at the bottom. */
     int topbar;
 
-    /// The tag root tree node
-    // TreeNode* root;
 };
 
 struct Output {
@@ -212,56 +210,9 @@ struct Output {
      */
     int wx, wy, ww, wh;
 
-    /* The seltags variable is either 0 or 1 and represents the currently selected tagset.
-     *
-     * This allows for a clever mechanism where one can easily flip between the current and
-     * previous tagset by simply flipping the value of seltags:
-     *
-     *    selmon->seltags ^= 1;
-     *
-     * For this reason when referring to the selected tags for a monitor you will often find
-     * these kind of patterns:
-     *
-     *    m->tagset[m->seltags]
-     *    selmon->tagset[selmon->seltags]
-     *    c->mon->tagset[c->mon->seltags]
-     *
-     * In principle this could just have been defined as two variables for the monitor.
-     *
-     *    m->tags
-     *    m->prevtags
-     *
-     * which would make the above patterns slightly easier to read, i.e.
-     *
-     *    m->tags
-     *    selmon->tags
-     *    c->mon->tags
-     *
-     * The benefit of using this mechanism, however, is that we save on a single line of code
-     * in the view function when the argument is 0 and we toggle back to the previous view.
-     */
-    unsigned int seltags;
-
-    /* This array holds the previously and currently viewed tags for the monitor, the index of
-     * which is indicated by the seltags variable. */
-    unsigned int tagset[2];
-
-    /* This represents the workspaces the monitor owns.
-     *
-     * As an example consider the hexadecimal value of 0x51 (decimal 81) which has a binary
-     * value of:
-     *    001010001  - bitmask
-     *    987654321  - workspaces
-     *
-     * This would mean that the monitor owns workspaces 1, 5 and 7.
-     */
-    unsigned int workspaces;
-
-    /// The currently selected workspace and the one being displayed on the monitor.
-    /// Also it has the previously displayed workspace.
-    unsigned int selected_workspaces[2];
-
-    int sel_ws;
+    /// Workspace IDs are one-based; the current and previous values support toggling.
+    unsigned int selected_workspace;
+    unsigned int previous_workspace;
 
     int hidsel;
 
@@ -286,8 +237,7 @@ struct Output {
     /* This is the bar window which is used to draw the bar. Each monitor has their own bar. */
     Client barwin;
 
-    uint32_t seltag;
-    Workspace* tags[9];
+    Workspace* workspaces[9];
 };
 
 struct WlOutput {
@@ -380,17 +330,15 @@ void focus_client(Seat* seat, Client* client);
 void focusstack(Seat* seat, Arg* arg);
 void focus_next(Seat* seat, Arg* arg);
 void focus_prev(Seat* esat, Arg* arg);
-void set_layout(Seat* seat, Arg* arg);
-void set_master_ratio(Seat* seat, Arg* arg);
+void setlayout(Seat* seat, Arg* arg);
+void setmfact(Seat* seat, Arg* arg);
 void incnmaster(Seat* seat, Arg* arg);
 void spawn(Seat* seat, Arg* arg);
-void view(Seat* seat, Arg* arg);
-void tag(Seat* seat, Arg* arg);
 void viewworkspace(Seat* seat, Arg* arg);
 void sendtoworkspace(Seat* seat, Arg* arg);
 void movetoworkspace(Seat* seat, Arg* arg);
 
-Node* create_node(Workspace* tag, Client* window, Node* parent);
+Node* create_node(Workspace* workspace, Client* window, Node* parent);
 void insert_node(Client* window, Node* root, Node* ref);
 void remove_node(Node* node);
 void propogate_layout(Node* root);

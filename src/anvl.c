@@ -29,7 +29,7 @@
 #define MIN(A, B) (A < B ? A : B)
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
-#define ISVISIBLE(C) ((C)->mon == selmon && (C)->workspace == selmon->selected_workspaces[selmon->sel_ws])
+#define ISVISIBLE(C) ((C)->mon == selmon && (C)->workspace == selmon->selected_workspace)
 #define CLAMP(VAL, MIN, MAX) VAL = VAL < MIN ? MIN : (VAL > MAX ? MAX : VAL)
 
 WindowManager anvl;
@@ -79,7 +79,7 @@ void tag_next_mon(Seat* seat, Arg* arg) {
             detachclient(selmon, client);
             detachstack(selmon, client);
             client->mon = next;
-            client->workspace = next->selected_workspaces[next->sel_ws];
+            client->workspace = next->selected_workspace;
             attachclient(next, client);
             attachstack(next, client);
             focus_client(seat, client);
@@ -95,7 +95,7 @@ void tag_prev_mon(Seat* seat, Arg* arg) {
             detachclient(selmon, client);
             detachstack(selmon, client);
             client->mon = prev;
-            client->workspace = prev->selected_workspaces[prev->sel_ws];
+            client->workspace = prev->selected_workspace;
             attachclient(prev, client);
             attachstack(prev, client);
             focus_client(seat, client);
@@ -109,7 +109,7 @@ void exit_session(Seat* seat, Arg* arg) {
 
 void setlayout(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
-        selmon->tags[selmon->seltag]->lt = arg->v;
+        SELECTED_WORKSPACE(selmon)->lt = arg->v;
     }
 }
 
@@ -138,19 +138,19 @@ void setlayout(Seat* seat, Arg* arg) {
 /* arg > 1.0 will set mfact absolutely */
 void setmfact(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
-        Workspace* tag = selmon->tags[selmon->seltag];
-        tag->master_ratio = MAX(0.1, MIN(0.9, tag->master_ratio + arg->f));
+        Workspace* workspace = SELECTED_WORKSPACE(selmon);
+        workspace->master_ratio = MAX(0.1, MIN(0.9, workspace->master_ratio + arg->f));
     }
 }
 
 /// User function to increment or decrement the number of client windows in the master area.
 void incnmaster(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
-        Workspace* tag = selmon->tags[selmon->seltag];
+        Workspace* workspace = SELECTED_WORKSPACE(selmon);
 
         /* This adjusts the number of master clients with the given argument. The
          * MAX(..., 0) is a safeguard to prevent the master count becoming negative. */
-        tag->master_count = MAX((int)tag->master_count + arg->i, 0);
+        workspace->master_count = MAX((int)workspace->master_count + arg->i, 0);
     }
 }
 
@@ -184,7 +184,7 @@ static void attachclient(Output* output, Client* client) {
 
 static Client* firstvisible(Output* output) {
     for (Client* client = output->stack; client != NULL; client = client->snext)
-        if (client->workspace == output->selected_workspaces[output->sel_ws])
+        if (client->workspace == output->selected_workspace)
             return client;
     return NULL;
 }
@@ -250,18 +250,22 @@ void focus_prev(Seat* seat, Arg* arg) {
 }
 
 void viewworkspace(Seat* seat, Arg* arg) {
-    if (selmon == NULL || arg->u > LENGTH(tags) || (arg->u != 0 && arg->u == selmon->selected_workspaces[selmon->sel_ws]))
+    if (selmon == NULL || arg->u > LENGTH(workspace_names) || (arg->u != 0 && arg->u == selmon->selected_workspace))
         return;
 
-    selmon->sel_ws ^= 1;
-    if (arg->u != 0)
-        selmon->selected_workspaces[selmon->sel_ws] = arg->u;
-    selmon->seltag = selmon->selected_workspaces[selmon->sel_ws] - 1;
+    if (arg->u == 0) {
+        unsigned int workspace = selmon->selected_workspace;
+        selmon->selected_workspace = selmon->previous_workspace;
+        selmon->previous_workspace = workspace;
+    } else {
+        selmon->previous_workspace = selmon->selected_workspace;
+        selmon->selected_workspace = arg->u;
+    }
     focus_client(seat, firstvisible(selmon));
 }
 
 void sendtoworkspace(Seat* seat, Arg* arg) {
-    if (selmon == NULL || selmon->sel == NULL || arg->u == 0 || arg->u > LENGTH(tags) || selmon->sel->workspace == arg->u)
+    if (selmon == NULL || selmon->sel == NULL || arg->u == 0 || arg->u > LENGTH(workspace_names) || selmon->sel->workspace == arg->u)
         return;
 
     selmon->sel->workspace = arg->u;
@@ -274,14 +278,6 @@ void movetoworkspace(Seat* seat, Arg* arg) {
 
     sendtoworkspace(seat, arg);
     viewworkspace(seat, arg);
-}
-
-void view(Seat* seat, Arg* arg) {
-    viewworkspace(seat, arg);
-}
-
-void tag(Seat* seat, Arg* arg) {
-    sendtoworkspace(seat, arg);
 }
 
 void spawn(Seat* seat, Arg* arg) {
@@ -329,7 +325,7 @@ void propogate_layout(Node* root) {
 
 void anvl_add_window(Client* window) {
     window->mon = selmon;
-    window->workspace = selmon->selected_workspaces[selmon->sel_ws];
+    window->workspace = selmon->selected_workspace;
     attachclient(selmon, window);
     attachstack(selmon, window);
     wl_list_insert(&anvl.windows, &window->link);
@@ -363,18 +359,16 @@ void anvl_remove_window(Client* window) {
 }
 
 void anvl_add_output(Output* output) {
-    output->seltag = 0;
-    output->sel_ws = 0;
-    output->selected_workspaces[0] = 1;
-    output->selected_workspaces[1] = 1;
-    for (int i = 0; i < LENGTH(tags); i++) {
-        Workspace* tag = calloc(1, sizeof(Workspace));
-        tag->n = i;
-        tag->sym = tags[i];
-        tag->lt = &layouts[0];
-        tag->master_ratio = default_master_ratio;
-        tag->master_count = default_master_count;
-        output->tags[i] = tag;
+    output->selected_workspace = 1;
+    output->previous_workspace = 1;
+    for (int i = 0; i < LENGTH(workspace_names); i++) {
+        Workspace* workspace = calloc(1, sizeof(Workspace));
+        workspace->n = i;
+        workspace->sym = workspace_names[i];
+        workspace->lt = &layouts[0];
+        workspace->master_ratio = default_master_ratio;
+        workspace->master_count = default_master_count;
+        output->workspaces[i] = workspace;
     }
 
     wl_list_insert(&anvl.outputs, &output->link);
@@ -384,9 +378,8 @@ void anvl_add_output(Output* output) {
 
 void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        Workspace* tag = output->tags[i];
-        free(tag);
+    for (int i = 0; i < LENGTH(output->workspaces); i++) {
+        free(output->workspaces[i]);
     }
     if (selmon == output)
         selmon = NULL;
@@ -420,7 +413,7 @@ void anvl_manage(void) {
 
     Output* output;
     wl_list_for_each(output, &anvl.outputs, link) {
-        output->tags[output->seltag]->lt->manage(output);
+        SELECTED_WORKSPACE(output)->lt->manage(output);
     }
 }
 
@@ -431,7 +424,7 @@ void manage_seat(Seat* seat) {
 
 void monocle(Output* output) {
     for (Client* client = output->clients; client != NULL; client = client->next) {
-        if (client->workspace != output->selected_workspaces[output->sel_ws])
+        if (client->workspace != output->selected_workspace)
             continue;
         river_window_show(client);
         river_window_move(client, output->wx, output->wy);
