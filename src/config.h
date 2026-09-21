@@ -9,6 +9,7 @@ static const bool lock_fullscreen = true;
 /* Focus a window when the pointer enters it. */
 static const bool focus_follows_mouse = true;
 static const bool swallow_floating = false;
+
 /*
  * Rules match substrings in Wayland's app_id and window title. A NULL filter
  * does not participate in matching, and the last matching rule wins.
@@ -22,6 +23,7 @@ static const Rule rules[] = {
     { .app_id = "st-256color", .isterminal = 1 },
     { .app_id = "spotify", .scratchpad = 1 },
 };
+
 /* The focused tiled client gets this compositor-drawn border when it has company. */
 static const int selected_border_width = 3;
 static const uint32_t selected_border_r = 0xe7e7e7e7U;
