@@ -5,7 +5,7 @@
 #define MIN(A, B) (A < B ? A : B)
 
 static bool isvisible(const Client* client, const Output* output) {
-    return client->mon == output && client->workspace == output->seltag;
+    return client->mon == output && client->workspace == output->selected_workspaces[output->sel_ws];
 }
 
 /// This handles the DWM-style master/stack tile arrangement.

@@ -292,7 +292,7 @@ void render_bar(WlOutput* output) {
     Client* window;
     wl_list_for_each(window, &anvl.windows, link) {
         if (window->mon == output->output)
-            occ |= 1U << window->workspace;
+            occ |= 1U << (window->workspace - 1);
     }
 
     /* We start by looping through all tags. Do not draw vacant tags, except for
@@ -320,7 +320,7 @@ void render_bar(WlOutput* output) {
      * of the title portion of dwm's bar. */
     int n = 0;
     wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon == output->output && window->workspace == output->output->seltag)
+        if (window->mon == output->output && window->workspace == output->output->seltag + 1)
             n++;
     }
 
@@ -341,7 +341,7 @@ void render_bar(WlOutput* output) {
         int remainder = textw % n;
         int tabw = textw / n;
         wl_list_for_each_reverse(window, &anvl.windows, link) {
-            if (window->mon != output->output || window->workspace != output->output->seltag)
+            if (window->mon != output->output || window->workspace != output->output->seltag + 1)
                 continue;
 
             int tab_width = tabw + (remainder-- > 0 ? 1 : 0);

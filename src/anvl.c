@@ -29,7 +29,7 @@
 #define MIN(A, B) (A < B ? A : B)
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
-#define ISVISIBLE(C) ((C)->mon == selmon && (C)->workspace == selmon->seltag)
+#define ISVISIBLE(C) ((C)->mon == selmon && (C)->workspace == selmon->selected_workspaces[selmon->sel_ws])
 #define CLAMP(VAL, MIN, MAX) VAL = VAL < MIN ? MIN : (VAL > MAX ? MAX : VAL)
 
 WindowManager anvl;
@@ -39,6 +39,7 @@ static void detachclient(Output* output, Client* client);
 static void detachstack(Output* output, Client* client);
 static void attachclient(Output* output, Client* client);
 static void attachstack(Output* output, Client* client);
+static Client* firstvisible(Output* output);
 
 void destroy_window(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
@@ -78,7 +79,7 @@ void tag_next_mon(Seat* seat, Arg* arg) {
             detachclient(selmon, client);
             detachstack(selmon, client);
             client->mon = next;
-            client->workspace = next->seltag;
+            client->workspace = next->selected_workspaces[next->sel_ws];
             attachclient(next, client);
             attachstack(next, client);
             focus_client(seat, client);
@@ -94,7 +95,7 @@ void tag_prev_mon(Seat* seat, Arg* arg) {
             detachclient(selmon, client);
             detachstack(selmon, client);
             client->mon = prev;
-            client->workspace = prev->seltag;
+            client->workspace = prev->selected_workspaces[prev->sel_ws];
             attachclient(prev, client);
             attachstack(prev, client);
             focus_client(seat, client);
@@ -106,13 +107,36 @@ void exit_session(Seat* seat, Arg* arg) {
     river_exit_session();
 }
 
-void set_layout(Seat* seat, Arg* arg) {
+void setlayout(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
         selmon->tags[selmon->seltag]->lt = arg->v;
     }
 }
 
-void set_master_ratio(Seat* seat, Arg* arg) {
+/* User function to set or adjust the master / stack factor (or ratio if you wish) for the
+ * selected monitor.
+ *
+ * The mfact is a floating value with:
+ *    - a minimum value of 0.05 (5% of the window area) and
+ *    - a maximum value of 0.95 (95% of the window area)
+ *
+ * As per the default configuration this factor is adjusted with increments or decrements of 0.05
+ * using the MOD+l and MOD+h keybindings.
+ *
+ * The default mfact value is 0.55 giving the master area slightly more space than the stack area.
+ *
+ * Optionally the user can pass a value greater than 1.0 to set an absolute value, in which case
+ * 1.0 will be subtracted from the given value. For example the following keybinding would
+ * explicitly set the mfact value to 0.5:
+ *
+ *     { MODKEY,                       XK_u,      setmfact,       {.f = 1.50} },
+ *
+ * When setting the mfact value absolutely the value given (less the subtracted 1.0) must fall
+ * within the minimum and maximum boundaries for the master / stack factor - otherwise the value
+ * will simply be ignored.
+ */
+/* arg > 1.0 will set mfact absolutely */
+void setmfact(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
         Workspace* tag = selmon->tags[selmon->seltag];
         tag->master_ratio = MAX(0.1, MIN(0.9, tag->master_ratio + arg->f));
@@ -158,6 +182,13 @@ static void attachclient(Output* output, Client* client) {
     output->clients = client;
 }
 
+static Client* firstvisible(Output* output) {
+    for (Client* client = output->stack; client != NULL; client = client->snext)
+        if (client->workspace == output->selected_workspaces[output->sel_ws])
+            return client;
+    return NULL;
+}
+
 void focus_client(Seat* seat, Client* client) {
     if (selmon == NULL)
         return;
@@ -185,8 +216,7 @@ void focusstack(Seat* seat, Arg* arg) {
     Client* iterator = NULL;
     int inc = arg->i;
 
-    if (selmon == NULL || (!selmon->sel) ||
-        (selmon->sel->isfullscreen && lock_fullscreen) || !selmon->clients)
+    if (selmon == NULL || (!selmon->sel) || (selmon->sel->isfullscreen && lock_fullscreen) || !selmon->clients)
         return;
 
     if (inc > 0) {
@@ -219,26 +249,39 @@ void focus_prev(Seat* seat, Arg* arg) {
     focusstack(seat, &prev);
 }
 
-void view(Seat* seat, Arg* arg) {
-    if (selmon != NULL) {
-        selmon->seltag = arg->u;
+void viewworkspace(Seat* seat, Arg* arg) {
+    if (selmon == NULL || arg->u > LENGTH(tags) || (arg->u != 0 && arg->u == selmon->selected_workspaces[selmon->sel_ws]))
+        return;
 
-        Client* client;
-        for (client = selmon->clients; client != NULL && !ISVISIBLE(client); client = client->next)
-            ;
-        focus_client(seat, client);
-    }
+    selmon->sel_ws ^= 1;
+    if (arg->u != 0)
+        selmon->selected_workspaces[selmon->sel_ws] = arg->u;
+    selmon->seltag = selmon->selected_workspaces[selmon->sel_ws] - 1;
+    focus_client(seat, firstvisible(selmon));
+}
+
+void sendtoworkspace(Seat* seat, Arg* arg) {
+    if (selmon == NULL || selmon->sel == NULL || arg->u == 0 || arg->u > LENGTH(tags) || selmon->sel->workspace == arg->u)
+        return;
+
+    selmon->sel->workspace = arg->u;
+    focus_client(seat, firstvisible(selmon));
+}
+
+void movetoworkspace(Seat* seat, Arg* arg) {
+    if (selmon == NULL || selmon->sel == NULL)
+        return;
+
+    sendtoworkspace(seat, arg);
+    viewworkspace(seat, arg);
+}
+
+void view(Seat* seat, Arg* arg) {
+    viewworkspace(seat, arg);
 }
 
 void tag(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL && selmon != NULL) {
-        seat->focused->workspace = arg->u;
-
-        Client* client;
-        for (client = selmon->clients; client != NULL && !ISVISIBLE(client); client = client->next)
-            ;
-        focus_client(seat, client);
-    }
+    sendtoworkspace(seat, arg);
 }
 
 void spawn(Seat* seat, Arg* arg) {
@@ -286,7 +329,7 @@ void propogate_layout(Node* root) {
 
 void anvl_add_window(Client* window) {
     window->mon = selmon;
-    window->workspace = selmon->seltag;
+    window->workspace = selmon->selected_workspaces[selmon->sel_ws];
     attachclient(selmon, window);
     attachstack(selmon, window);
     wl_list_insert(&anvl.windows, &window->link);
@@ -321,6 +364,9 @@ void anvl_remove_window(Client* window) {
 
 void anvl_add_output(Output* output) {
     output->seltag = 0;
+    output->sel_ws = 0;
+    output->selected_workspaces[0] = 1;
+    output->selected_workspaces[1] = 1;
     for (int i = 0; i < LENGTH(tags); i++) {
         Workspace* tag = calloc(1, sizeof(Workspace));
         tag->n = i;
@@ -385,7 +431,7 @@ void manage_seat(Seat* seat) {
 
 void monocle(Output* output) {
     for (Client* client = output->clients; client != NULL; client = client->next) {
-        if (client->workspace != output->seltag)
+        if (client->workspace != output->selected_workspaces[output->sel_ws])
             continue;
         river_window_show(client);
         river_window_move(client, output->wx, output->wy);

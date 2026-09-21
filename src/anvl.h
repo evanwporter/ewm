@@ -386,6 +386,9 @@ void incnmaster(Seat* seat, Arg* arg);
 void spawn(Seat* seat, Arg* arg);
 void view(Seat* seat, Arg* arg);
 void tag(Seat* seat, Arg* arg);
+void viewworkspace(Seat* seat, Arg* arg);
+void sendtoworkspace(Seat* seat, Arg* arg);
+void movetoworkspace(Seat* seat, Arg* arg);
 
 Node* create_node(Workspace* tag, Client* window, Node* parent);
 void insert_node(Client* window, Node* root, Node* ref);

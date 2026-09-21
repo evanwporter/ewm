@@ -27,7 +27,7 @@ static Layout layouts[] = {
 #define ALT RIVER_SEAT_V1_MODIFIERS_MOD1
 
 #define TAGKEY(KEY, TAG) \
-    { SUPER, KEY, view, { .u = TAG } }, { SUPER | SHIFT, KEY, tag, { .u = TAG } },
+    { SUPER, KEY, viewworkspace, { .u = TAG + 1 } }, { SUPER | SHIFT, KEY, movetoworkspace, { .u = TAG + 1 } },
 
 static const char* termcmd[] = { "kitty", NULL };
 static const char* reloadcmd[] = { "sh", "-c", "pkill -x anvl; exec anvl", NULL };
