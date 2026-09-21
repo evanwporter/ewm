@@ -13,16 +13,16 @@
 bool river_init(void);
 bool river_supported(void);
 
-void river_window_close(Window* window);
-void river_window_show(Window* window);
-void river_window_hide(Window* window);
-void river_window_move(Window* window, int x, int y);
-void river_window_resize(Window* window, int width, int height);
-void river_window_prepare(Window* window);
+void river_window_close(Client* window);
+void river_window_show(Client* window);
+void river_window_hide(Client* window);
+void river_window_move(Client* window, int x, int y);
+void river_window_resize(Client* window, int width, int height);
+void river_window_prepare(Client* window);
 
-void river_focus_window(Seat* seat, Window* window);
+void river_focus_window(Seat* seat, Client* window);
 void river_clear_focus(Seat* seat);
-void river_raise_window(Window* window);
+void river_raise_window(Client* window);
 void river_pointer_warp(Seat* seat, int x, int y);
 void river_select_output(Output* output);
 void river_exit_session(void);

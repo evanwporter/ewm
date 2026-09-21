@@ -1,12 +1,15 @@
 #ifndef ANVLH
 #define ANVLH
 
+#include <sys/types.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 
 #include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
+
+#define PERWS(M) (M->workspaces[(M)->selected_workspaces[(M)->sel_ws] - 1])
 
 struct river_window_v1;
 struct river_node_v1;
@@ -18,27 +21,72 @@ struct river_pointer_binding_v1;
 struct zwlr_layer_surface_v1;
 
 typedef struct WlOutput WlOutput;
-typedef struct Window Window;
+typedef struct Client Client;
 typedef struct Output Output;
 typedef struct Layout Layout;
 typedef struct Node Node;
 typedef struct Seat Seat;
-typedef struct Tag Tag;
+typedef struct Workspace Workspace;
 
-struct Window {
+struct Client {
     struct river_window_v1* river_window;
     struct river_node_v1* river_node;
     struct wl_list link;
 
+    /// The name holds the window title.
+    char* name;
     char* title;
 
-    int x;
-    int y;
+    /// The client x, y coordinates and size (width, height).
+    int x, y, w, h;
+    int width, height;
 
-    int width;
-    int height;
+    int oldx, oldy, oldw, oldh;
 
+    /* These variables are all in relation to size hints.
+     *    basew - base width
+     *    baseh - base height
+     *    incw - width increment
+     *    inch - height increment
+     *    minw - minimum width
+     *    minh - minimum height
+     *    maxw - maximum width
+     *    maxh - maximum height
+     *    hintsvalid - flag indicating whether size hints need to be refreshed
+     */
+    int basew, baseh, incw, inch, maxw, maxh, minw, minh, hintsvalid;
+
+    /// The workspace the client is attached too
+    unsigned int workspace;
+
+    /// Non-zero scratchpad identifier; retained while a floating pad moves workspaces.
+    unsigned int scratchpad;
+
+    int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen, isterminal, noswallow;
+    pid_t pid;
+
+    /// The next client in the client list, which is a linked list. The client list controls the
+    /// order in which clients are tiled.
+    Client* next;
+
+    /* The leaf node representing this client in its monitor's tree layout. */
     Node* node;
+
+    /* The next client in the stacking order list, which is also a linked list. The stacking
+     * order indicates which window is on top of others as well as the order in which clients
+     * had focus. */
+    Client* snext;
+
+    Client* swallowing;
+
+    /// The monitor this client belongs to.
+    Client* mon;
+
+    // /// The managed window that this client represents.
+    // Client win;
+
+    /// The icon to display in the tabline / window titles
+    char* icon;
 };
 
 typedef enum { HORIZONTAL,
@@ -55,16 +103,16 @@ struct Node {
     int width;
     int height;
 
-    Window* window;
+    Client* window;
 
     Node* first;
     Node* second;
     Node* parent;
 
-    Tag* tag;
+    Workspace* tag;
 };
 
-struct Tag {
+struct Workspace {
     int n;
     const char* sym;
 
@@ -72,6 +120,64 @@ struct Tag {
     Node* focused;
 
     Layout* lt;
+    float master_ratio;
+    unsigned int master_count;
+
+    /* This represents the number of clients that are to be tiled in the master area. This has
+     * no upper limit but cannot be less than 0. The default value is configured in the
+     * configuration file and the value is adjusted via the incnmaster function. */
+    //  Default nmaster = 1:
+    // ┌───────────┬────┐
+    // │           │ C2 │
+    // │    C1     ├────┤
+    // │  (master) │ C3 │
+    // │           ├────┤
+    // │           │ C4 │
+    // └───────────┴────┘
+    //
+    // With nmaster = 2:
+    // ┌───────────┬────┐
+    // │    C1     │ C3 │
+    // │  (master) ├────┤
+    // ├───────────┤ C4 │
+    // │    C2     ├────┤
+    // │ (also     │ C5 │
+    // │  master)  │    │
+    // └───────────┴────┘
+    /// Number of windows in master area
+    int nmaster;
+
+    /// What percentage of the screen master gets
+    float mfact;
+
+    /* The sellt variable is either 0 or 1 and represents the currently selected layout. This
+     * follows the same mechanism as seltags above giving patterns such a:
+     *
+     *    m->lt[m->sellt]
+     *    selmon->lt[selmon->sellt]
+     *    c->mon->lt[c->mon->sellt]
+     */
+    unsigned int sellt;
+
+    /* This array holds the previous and current layout for the monitor, the index of which is
+     * indicated by the sellt variable. */
+    const Layout* layouts[2];
+
+    /* This holds the layout symbol text, typically as defined in the layouts array. This is
+     * used when drawing the layout symbol on the bar. The reason why this is defined for the
+     * monitor rather than simply using the layout symbol as defined in the layouts array is
+     * that some layouts, like the monocle layout for example, may alter the layout symbol
+     * depending on how many clients are present. */
+    char ltsymbol[16];
+
+    /* Internal flag indicating whether the bar is shown or not. */
+    int showbar;
+
+    /* Internal flag indicating whether the bar is shown at the top or at the bottom. */
+    int topbar;
+
+    /// The tag root tree node
+    // TreeNode* root;
 };
 
 struct Output {
@@ -79,14 +185,109 @@ struct Output {
     struct river_layer_shell_output_v1* river_layer_shell;
     struct wl_list link;
 
-    int x;
-    int y;
+    /* These variables represents the position and dimensions of the monitor.
+     *    mx - monitor position on the x-axis
+     *    my - monitor position on the y-axis
+     *    mw - the monitor's width
+     *    mh - the monitor's height
+     */
+    int mx, my, mw, mh;
 
     int width;
     int height;
 
+    /* The by variable defines the bar windows position on the y axis and this is set in the
+     * updatebarpos function. */
+    int by; /* bar geometry */
+    int btw; /* width of tasks portion of bar */
+    int bt; /* number of tasks */
+
+    /* These variables represents the position and dimensions of the window area, as in the part
+     * of the monitor where windows are tiled. This is the space of the monitor excluding the
+     * bar window. These are set in the updatebarpos function.
+     *    wx - window area position on the x-axis
+     *    wy - window area position on the y-axis
+     *    ww - the window area's width
+     *    wh - the window area's height
+     */
+    int wx, wy, ww, wh;
+
+    /* The seltags variable is either 0 or 1 and represents the currently selected tagset.
+     *
+     * This allows for a clever mechanism where one can easily flip between the current and
+     * previous tagset by simply flipping the value of seltags:
+     *
+     *    selmon->seltags ^= 1;
+     *
+     * For this reason when referring to the selected tags for a monitor you will often find
+     * these kind of patterns:
+     *
+     *    m->tagset[m->seltags]
+     *    selmon->tagset[selmon->seltags]
+     *    c->mon->tagset[c->mon->seltags]
+     *
+     * In principle this could just have been defined as two variables for the monitor.
+     *
+     *    m->tags
+     *    m->prevtags
+     *
+     * which would make the above patterns slightly easier to read, i.e.
+     *
+     *    m->tags
+     *    selmon->tags
+     *    c->mon->tags
+     *
+     * The benefit of using this mechanism, however, is that we save on a single line of code
+     * in the view function when the argument is 0 and we toggle back to the previous view.
+     */
+    unsigned int seltags;
+
+    /* This array holds the previously and currently viewed tags for the monitor, the index of
+     * which is indicated by the seltags variable. */
+    unsigned int tagset[2];
+
+    /* This represents the workspaces the monitor owns.
+     *
+     * As an example consider the hexadecimal value of 0x51 (decimal 81) which has a binary
+     * value of:
+     *    001010001  - bitmask
+     *    987654321  - workspaces
+     *
+     * This would mean that the monitor owns workspaces 1, 5 and 7.
+     */
+    unsigned int workspaces;
+
+    /// The currently selected workspace and the one being displayed on the monitor.
+    /// Also it has the previously displayed workspace.
+    unsigned int selected_workspaces[2];
+
+    int sel_ws;
+
+    int hidsel;
+
+    /* The client list. This represents the start of a linked list of clients which determines
+     * the order in which clients are tiled. */
+    Client* clients;
+
+    /* This represents the monitor's selected client. */
+    Client* sel;
+
+    /* The stacking order list. This represents the order in which client windows are stacked on
+     * top of each other, as well as the order in which clients had last focus. */
+    Client* stack;
+
+    /* Monitors are also managed as a linked list with the mons variable referring to the first
+     * monitor. The next variable on the monitor refers to the next monitor in the list. */
+    Output* next;
+
+    // /// The root of the tree tile display
+    // TreeNode *root;
+
+    /* This is the bar window which is used to draw the bar. Each monitor has their own bar. */
+    Client barwin;
+
     uint32_t seltag;
-    Tag* tags[9];
+    Workspace* tags[9];
 };
 
 struct WlOutput {
@@ -111,7 +312,7 @@ struct Seat {
     struct river_seat_v1* river_seat;
     struct wl_list link;
 
-    Window* focused;
+    Client* focused;
 
     struct wl_list keys;
     struct wl_list buttons;
@@ -178,20 +379,22 @@ void exit_session(Seat* seat, Arg* arg);
 void focus_next(Seat* seat, Arg* arg);
 void focus_prev(Seat* esat, Arg* arg);
 void set_layout(Seat* seat, Arg* arg);
+void set_master_ratio(Seat* seat, Arg* arg);
+void inc_master_count(Seat* seat, Arg* arg);
 void spawn(Seat* seat, Arg* arg);
 void view(Seat* seat, Arg* arg);
 void tag(Seat* seat, Arg* arg);
 
-Node* create_node(Tag* tag, Window* window, Node* parent);
-void insert_node(Window* window, Node* root, Node* ref);
+Node* create_node(Workspace* tag, Client* window, Node* parent);
+void insert_node(Client* window, Node* root, Node* ref);
 void remove_node(Node* node);
 void propogate_layout(Node* root);
 
 void tile(Output* output);
 void monocle(Output* output);
 void manage_seat(Seat* seat);
-void anvl_add_window(Window* window);
-void anvl_remove_window(Window* window);
+void anvl_add_window(Client* window);
+void anvl_remove_window(Client* window);
 void anvl_add_output(Output* output);
 void anvl_remove_output(Output* output);
 void anvl_output_position(Output* output, int x, int y);

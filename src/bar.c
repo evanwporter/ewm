@@ -37,7 +37,7 @@ bool set_font_scale(int scale) {
         return true;
 
     char attributes[32];
-    snprintf(attributes, sizeof(attributes), "pixelsize=%d", fontpx * scale);
+    snprintf(attributes, sizeof(attributes), "pixelsize=%d:weight=bold", fontpx * scale);
     const char* names[] = { font };
     struct fcft_font* scaled_font = fcft_from_name2(1, names, attributes, NULL);
     if (scaled_font == NULL) {
@@ -289,7 +289,7 @@ void render_bar(WlOutput* output) {
     /// Bitmask that holds occupied workspaces.
     unsigned int occ = 0;
 
-    Window* window;
+    Client* window;
     wl_list_for_each(window, &anvl.windows, link) {
         if (window->node != NULL)
             occ |= 1U << window->node->tag->n;
@@ -340,7 +340,7 @@ void render_bar(WlOutput* output) {
     if ((textw = w - statusw - x) > h && n > 0) {
         int remainder = textw % n;
         int tabw = textw / n;
-        wl_list_for_each(window, &anvl.windows, link) {
+        wl_list_for_each_reverse(window, &anvl.windows, link) {
             if (window->node == NULL || window->node->tag != output->output->tags[output->output->seltag])
                 continue;
 

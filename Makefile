@@ -3,16 +3,17 @@ CONFIG_FILE := config.h
 
 SRC_DIR := src
 BUILD_DIR := .build
+LAYOUT_SRC := $(SRC_DIR)/tile.c
 
-FLAGS := -std=c23 -I $(BUILD_DIR) $(shell pkg-config --cflags --libs xkbcommon wayland-client pixman-1 fcft)
+FLAGS := -std=c23 -I $(BUILD_DIR) -I $(SRC_DIR) $(shell pkg-config --cflags --libs xkbcommon wayland-client pixman-1 fcft)
 
 PROTO_OBJS := $(patsubst protocol/%.xml, $(BUILD_DIR)/%-protocol.o, $(shell fd -e xml . protocol))
 PROTO_HEADERS := $(patsubst protocol/%.xml, $(BUILD_DIR)/%-client-protocol.h, $(shell fd -e xml . protocol))
 
 .PRECIOUS: $(BUILD_DIR)/%.o $(BUILD_DIR)/%.h $(BUILD_DIR)/%.c
 
-$(BUILD_DIR)/$(MAIN_FILE): $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(SRC_DIR)/$(MAIN_FILE).h $(SRC_DIR)/river.h $(SRC_DIR)/bar.h $(SRC_DIR)/$(CONFIG_FILE) $(PROTO_OBJS) $(PROTO_HEADERS)
-	$(CC) -o $@ $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(PROTO_OBJS) $(FLAGS)
+$(BUILD_DIR)/$(MAIN_FILE): $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(LAYOUT_SRC) $(SRC_DIR)/$(MAIN_FILE).h $(SRC_DIR)/river.h $(SRC_DIR)/bar.h $(SRC_DIR)/$(CONFIG_FILE) $(PROTO_OBJS) $(PROTO_HEADERS)
+	$(CC) -o $@ $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(LAYOUT_SRC) $(PROTO_OBJS) $(FLAGS)
 
 $(BUILD_DIR)/%-protocol.o: $(BUILD_DIR)/%-protocol.c
 	$(CC) -c $(FLAGS) $^ -o $@

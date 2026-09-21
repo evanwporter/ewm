@@ -47,7 +47,7 @@ void focus_next_mon(Seat* seat, Arg* arg) {
         if (next != NULL && &next->link != &anvl.outputs) {
             selmon = next;
             river_select_output(selmon);
-            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
+            river_pointer_warp(seat, selmon->mx + selmon->width / 2, selmon->my + selmon->height / 2);
         }
     }
 }
@@ -58,7 +58,7 @@ void focus_prev_mon(Seat* seat, Arg* arg) {
         if (prev != NULL && &prev->link != &anvl.outputs) {
             selmon = prev;
             river_select_output(selmon);
-            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
+            river_pointer_warp(seat, selmon->mx + selmon->width / 2, selmon->my + selmon->height / 2);
         }
     }
 }
@@ -93,26 +93,69 @@ void set_layout(Seat* seat, Arg* arg) {
     }
 }
 
-// TODO: loop and only through windows on selmon
-void focus_next(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL) {
-        Window* next = wl_container_of(seat->focused->link.next, seat->focused, link);
-        if (next != NULL && &next->link != &anvl.windows) {
-            seat->focused = next;
-            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
-        }
+void set_master_ratio(Seat* seat, Arg* arg) {
+    if (selmon != NULL) {
+        Workspace* tag = selmon->tags[selmon->seltag];
+        tag->master_ratio = MAX(0.1, MIN(0.9, tag->master_ratio + arg->f));
     }
 }
 
-// TODO: loop and only through windows on selmon
-void focus_prev(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL) {
-        Window* prev = wl_container_of(seat->focused->link.prev, seat->focused, link);
-        if (prev != NULL && &prev->link != &anvl.windows) {
-            seat->focused = prev;
-            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
+/// User function to increment or decrement the number of client windows in the master area.
+void inc_master_count(Seat* seat, Arg* arg) {
+    if (selmon != NULL) {
+        Workspace* tag = selmon->tags[selmon->seltag];
+
+        /* This adjusts the number of master clients with the given argument. The
+         * MAX(..., 0) is a safeguard to prevent the master count becoming negative. */
+        tag->master_count = MAX((int)tag->master_count + arg->i, 0);
+    }
+}
+
+static void focus_layout_window(Seat* seat, int direction) {
+    if (selmon == NULL)
+        return;
+
+    Node* queue[1 << 16];
+    Client* windows[1 << 16];
+    uint32_t front = 0, back = 0, count = 0, current = UINT32_MAX;
+    queue[back++] = selmon->tags[selmon->seltag]->root;
+
+    while (front != back) {
+        Node* node = queue[front++];
+        if (node->first != NULL && node->second != NULL) {
+            queue[back++] = node->first;
+            queue[back++] = node->second;
+        } else if (node->window != NULL) {
+            if (node->window == seat->focused)
+                current = count;
+            windows[count++] = node->window;
         }
     }
+
+    if (count == 0)
+        return;
+    if (current == UINT32_MAX)
+        current = direction > 0 ? count - 1 : 0;
+
+    // Down walks master then stack. Up returns from any slave to master;
+    // up on master wraps to stack's last window.
+    if (direction > 0)
+        current = (current + 1) % count;
+    else if (current == 0)
+        current = count - 1;
+    else
+        current = 0;
+
+    seat->focused = windows[current];
+    river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
+}
+
+void focus_next(Seat* seat, Arg* arg) {
+    focus_layout_window(seat, 1);
+}
+
+void focus_prev(Seat* seat, Arg* arg) {
+    focus_layout_window(seat, -1);
 }
 
 void view(Seat* seat, Arg* arg) {
@@ -133,7 +176,7 @@ void spawn(Seat* seat, Arg* arg) {
         execvp(((char**)arg->v)[0], (char**)arg->v);
 }
 
-Node* create_node(Tag* tag, Window* window, Node* parent) {
+Node* create_node(Workspace* tag, Client* window, Node* parent) {
     Node* node = calloc(1, sizeof(Node));
     node->tag = tag;
     node->split_type = UNSET;
@@ -148,13 +191,13 @@ Node* create_node(Tag* tag, Window* window, Node* parent) {
 // Insert window after ref, which has to be a leaf node with a window attached,
 // by splitting it If ref is NULL, the tree is assumed to be empty and window is
 // inserted on root
-void insert_node(Window* window, Node* root, Node* ref) {
+void insert_node(Client* window, Node* root, Node* ref) {
     if (ref == NULL) {
         root->window = window;
         window->node = root;
         root->tag->focused = root;
     } else {
-        Window* ref_window = ref->window;
+        Client* ref_window = ref->window;
         ref->window = NULL;
 
         if (ref->split_type == UNSET) {
@@ -186,7 +229,6 @@ void remove_node(Node* node) {
     } else {
         Node* sibling = parent->first != node ? parent->first : parent->second;
 
-        parent->split_type = sibling->split_type;
         parent->split_ratio = sibling->split_ratio;
         parent->first = sibling->first;
         if (parent->first != NULL)
@@ -220,7 +262,6 @@ void propogate_layout(Node* root) {
         if (n->first != NULL && n->second != NULL) {
             queue[back++] = n->first;
             queue[back++] = n->second;
-
             n->first->x = n->x;
             n->first->y = n->y;
             n->first->width = n->split_type == VERTICAL
@@ -246,8 +287,8 @@ void propogate_layout(Node* root) {
 // Used for dragging
 // Used for dragging
 
-void anvl_add_window(Window* window) {
-    Tag* tag = selmon->tags[selmon->seltag];
+void anvl_add_window(Client* window) {
+    Workspace* tag = selmon->tags[selmon->seltag];
 
     insert_node(window, tag->root, tag->focused);
     wl_list_insert(&anvl.windows, &window->link);
@@ -256,7 +297,7 @@ void anvl_add_window(Window* window) {
     wl_list_for_each(seat, &anvl.seats, link) { seat->focused = window; }
 }
 
-void anvl_remove_window(Window* window) {
+void anvl_remove_window(Client* window) {
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) {
         if (seat->focused == window)
@@ -270,11 +311,13 @@ void anvl_remove_window(Window* window) {
 void anvl_add_output(Output* output) {
     output->seltag = 0;
     for (int i = 0; i < LENGTH(tags); i++) {
-        Tag* tag = calloc(1, sizeof(Tag));
+        Workspace* tag = calloc(1, sizeof(Workspace));
         tag->n = i;
         tag->sym = tags[i];
         tag->root = create_node(tag, NULL, NULL);
         tag->lt = &layouts[0];
+        tag->master_ratio = default_master_ratio;
+        tag->master_count = default_master_count;
         output->tags[i] = tag;
     }
 
@@ -286,7 +329,7 @@ void anvl_add_output(Output* output) {
 void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
     for (int i = 0; i < LENGTH(output->tags); i++) {
-        Tag* tag = output->tags[i];
+        Workspace* tag = output->tags[i];
         Node* queue[1 << 16];
         uint32_t front = 0, back = 0;
         queue[back++] = tag->root;
@@ -308,8 +351,8 @@ void anvl_remove_output(Output* output) {
 }
 
 void anvl_output_position(Output* output, int x, int y) {
-    output->x = x;
-    output->y = y;
+    output->mx = x;
+    output->my = y;
     for (int i = 0; i < LENGTH(output->tags); i++) {
         output->tags[i]->root->x = x + gappx;
         output->tags[i]->root->y = y + (show_bar && top_bar ? barpx : 0) + gappx;
@@ -329,7 +372,7 @@ void anvl_manage(void) {
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
 
-    Window* window;
+    Client* window;
     wl_list_for_each(window, &anvl.windows, link) {
         river_window_prepare(window);
     }
@@ -356,27 +399,6 @@ void manage_seat(Seat* seat) {
     }
 }
 
-void tile(Output* output) {
-    Node* queue[1 << 16];
-    uint32_t front = 0;
-    uint32_t back = 0;
-
-    queue[back++] = output->tags[output->seltag]->root;
-
-    Node* n;
-    while (front != back) {
-        n = queue[front++];
-        if (n->first != NULL && n->second != NULL) {
-            queue[back++] = n->first;
-            queue[back++] = n->second;
-        } else if (n->window != NULL) {
-            river_window_show(n->window);
-            river_window_resize(n->window, n->window->node->width, n->window->node->height);
-            river_window_move(n->window, n->window->node->x, n->window->node->y);
-        }
-    }
-}
-
 void monocle(Output* output) {
     Node* queue[1 << 16];
     uint32_t front = 0;
@@ -392,7 +414,7 @@ void monocle(Output* output) {
             queue[back++] = n->second;
         } else if (n->window != NULL) {
             river_window_show(n->window);
-            river_window_move(n->window, output->x, output->y + (show_bar && top_bar ? barpx : 0));
+            river_window_move(n->window, output->mx, output->my + (show_bar && top_bar ? barpx : 0));
             river_window_resize(n->window, output->width, output->height - (show_bar ? barpx : 0));
         }
     }
@@ -401,8 +423,6 @@ void monocle(Output* output) {
 // https://wayland-book.com/surfaces/shared-memory.html
 // ---
 // ---
-
-/* Keep these in sync with dwm/palette.h. */
 
 // credit to
 // https://git.sr.ht/~zuki/zrwm/tree/afc021dd91bba7a69b1f10fbbf8c5d7bfd66490a/item/zrwm.c#L636
