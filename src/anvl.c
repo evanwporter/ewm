@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -40,10 +41,14 @@ static void detachstack(Output* output, Client* client);
 static void attachclient(Output* output, Client* client);
 static void attachstack(Output* output, Client* client);
 static Client* firstvisible(Output* output);
+static Client* focused_or_firstvisible(Output* output);
+static void swallow(Client* client);
+static void update_selected_border(Output* output);
 
 void destroy_window(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
-        river_window_close(seat->focused);
+        Client* client = seat->focused->swallowing ? seat->focused->swallowing : seat->focused;
+        river_window_close(client);
     }
 }
 
@@ -189,6 +194,16 @@ static Client* firstvisible(Output* output) {
     return NULL;
 }
 
+/* Restore the workspace's last focused client when returning to it. */
+static Client* focused_or_firstvisible(Output* output) {
+    Workspace* workspace = SELECTED_WORKSPACE(output);
+    Client* client = workspace->selected;
+
+    if (client != NULL && client->mon == output && client->workspace == output->selected_workspace)
+        return client;
+    return firstvisible(output);
+}
+
 void focus_client(Seat* seat, Client* client) {
     if (selmon == NULL)
         return;
@@ -203,8 +218,10 @@ void focus_client(Seat* seat, Client* client) {
     selmon->sel = client;
     seat->focused = client;
     if (client != NULL) {
-        river_focus_window(seat, client);
-        river_raise_window(client);
+        SELECTED_WORKSPACE(selmon)->selected = client;
+        Client* focused = client->swallowing ? client->swallowing : client;
+        river_focus_window(seat, focused);
+        river_raise_window(focused);
     } else {
         river_clear_focus(seat);
     }
@@ -261,15 +278,20 @@ void viewworkspace(Seat* seat, Arg* arg) {
         selmon->previous_workspace = selmon->selected_workspace;
         selmon->selected_workspace = arg->u;
     }
-    focus_client(seat, firstvisible(selmon));
+    focus_client(seat, focused_or_firstvisible(selmon));
 }
 
 void sendtoworkspace(Seat* seat, Arg* arg) {
     if (selmon == NULL || selmon->sel == NULL || arg->u == 0 || arg->u > LENGTH(workspace_names) || selmon->sel->workspace == arg->u)
         return;
 
-    selmon->sel->workspace = arg->u;
-    focus_client(seat, firstvisible(selmon));
+    Client* client = selmon->sel;
+    Workspace* workspace = SELECTED_WORKSPACE(selmon);
+
+    if (workspace->selected == client)
+        workspace->selected = NULL;
+    client->workspace = arg->u;
+    focus_client(seat, focused_or_firstvisible(selmon));
 }
 
 void movetoworkspace(Seat* seat, Arg* arg) {
@@ -283,6 +305,105 @@ void movetoworkspace(Seat* seat, Arg* arg) {
 void spawn(Seat* seat, Arg* arg) {
     if (fork() == 0)
         execvp(((char**)arg->v)[0], (char**)arg->v);
+}
+
+/*
+ * Apply the available Wayland window metadata. app_id is the closest analogue
+ * to an X11 class; there is no Wayland instance field. Keep scanning after a
+ * match so configuration can provide broad defaults followed by exceptions.
+ */
+static void applyrules(Client* client) {
+    client->isterminal = 0;
+
+    for (size_t i = 0; i < LENGTH(rules); i++) {
+        const Rule* rule = &rules[i];
+
+        if ((!rule->app_id || (client->app_id && strstr(client->app_id, rule->app_id))) && (!rule->title || (client->title && strstr(client->title, rule->title))))
+            client->isterminal = rule->isterminal;
+    }
+}
+
+static pid_t parent_pid(pid_t pid) {
+#ifdef __linux__
+    char path[64];
+    char state;
+    pid_t parent = 0;
+    FILE* file;
+
+    snprintf(path, sizeof(path), "/proc/%ld/stat", (long)pid);
+    file = fopen(path, "r");
+    if (file != NULL) {
+        if (fscanf(file, "%*d %*s %c %d", &state, &parent) != 2)
+            parent = 0;
+        fclose(file);
+    }
+    return parent;
+#else
+    return 0;
+#endif
+}
+
+static bool is_descendant(pid_t ancestor, pid_t client) {
+    while (client != 0 && client != ancestor)
+        client = parent_pid(client);
+    return client == ancestor;
+}
+
+static Client* terminal_for(const Client* client) {
+    Output* output;
+    wl_list_for_each(output, &anvl.outputs, link) for (Client* candidate = output->clients; candidate != NULL; candidate = candidate->next) if (candidate->isterminal && candidate->swallowing == NULL && candidate->pid != 0 && is_descendant(candidate->pid, client->pid)) return candidate;
+    return NULL;
+}
+
+static void unswallow(Client* terminal) {
+    Client* child = terminal->swallowing;
+    if (child == NULL)
+        return;
+
+    terminal->swallowing = NULL;
+    child->swallowed_by = NULL;
+    river_window_show(terminal);
+}
+
+static void swallow(Client* client) {
+    Client* terminal;
+
+    if (client->pid == 0 || client->isterminal || client->noswallow || (!swallow_floating && client->isfloating) || client->swallowed_by != NULL)
+        return;
+    terminal = terminal_for(client);
+    if (terminal == NULL)
+        return;
+
+    detachclient(client->mon, client);
+    detachstack(client->mon, client);
+    client->mon = terminal->mon;
+    client->workspace = terminal->workspace;
+    client->swallowed_by = terminal;
+    terminal->swallowing = client;
+    if (terminal->mon->sel == client)
+        terminal->mon->sel = terminal;
+    if (SELECTED_WORKSPACE(terminal->mon)->selected == client)
+        SELECTED_WORKSPACE(terminal->mon)->selected = terminal;
+    river_window_hide(terminal);
+}
+
+void anvl_set_client_app_id(Client* client, const char* app_id) {
+    free(client->app_id);
+    client->app_id = app_id == NULL ? NULL : strdup(app_id);
+    applyrules(client);
+    swallow(client);
+}
+
+void anvl_set_client_title(Client* client, const char* title) {
+    free(client->title);
+    client->title = title == NULL ? NULL : strdup(title);
+    applyrules(client);
+    swallow(client);
+}
+
+void anvl_set_client_pid(Client* client, pid_t pid) {
+    client->pid = pid > 0 ? pid : 0;
+    swallow(client);
 }
 
 void propogate_layout(Node* root) {
@@ -336,6 +457,19 @@ void anvl_add_window(Client* window) {
 
 void anvl_remove_window(Client* window) {
     Output* output = window->mon;
+
+    if (window->swallowed_by != NULL)
+        unswallow(window->swallowed_by);
+    if (window->swallowing != NULL)
+        window->swallowing->swallowed_by = NULL;
+
+    Output* focused_output;
+    wl_list_for_each(focused_output, &anvl.outputs, link) {
+        for (size_t i = 0; i < LENGTH(focused_output->workspaces); i++) {
+            if (focused_output->workspaces[i]->selected == window)
+                focused_output->workspaces[i]->selected = NULL;
+        }
+    }
 
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) {
@@ -409,11 +543,39 @@ void anvl_manage(void) {
     Client* window;
     wl_list_for_each(window, &anvl.windows, link) {
         river_window_prepare(window);
+        river_window_set_selected_border(window, false);
     }
 
     Output* output;
     wl_list_for_each(output, &anvl.outputs, link) {
         SELECTED_WORKSPACE(output)->lt->manage(output);
+        for (Client* client = output->clients; client != NULL; client = client->next) {
+            Client* child = client->swallowing;
+            if (child == NULL)
+                continue;
+            river_window_hide(client);
+            river_window_show(child);
+            river_window_move(child, client->x, client->y);
+            river_window_resize(child, client->width, client->height);
+        }
+        update_selected_border(output);
+    }
+}
+
+/* Only distinguish focus when tiling more than one client. Monocle intentionally has no border. */
+static void update_selected_border(Output* output) {
+    unsigned int visible = 0;
+
+    for (Client* client = output->clients; client != NULL; client = client->next)
+        if (client->workspace == output->selected_workspace)
+            visible++;
+
+    if (visible < 2 || SELECTED_WORKSPACE(output)->lt->manage == monocle)
+        return;
+
+    if (output->sel != NULL) {
+        Client* focused = output->sel->swallowing ? output->sel->swallowing : output->sel;
+        river_window_set_selected_border(focused, true);
     }
 }
 

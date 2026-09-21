@@ -90,6 +90,7 @@ void river_window_v1_closed(void* data, struct river_window_v1* obj) {
 
     river_window_v1_destroy(window->river_window);
     free(window->title);
+    free(window->app_id);
     free(window);
 }
 
@@ -101,12 +102,11 @@ void river_window_v1_dimensions(void* data, struct river_window_v1* obj, int32_t
     window->height = height;
 }
 
-void river_window_v1_app_id(void* data, struct river_window_v1* obj, const char* app_id) { }
+void river_window_v1_app_id(void* data, struct river_window_v1* obj, const char* app_id) {
+    anvl_set_client_app_id(data, app_id);
+}
 void river_window_v1_title(void* data, struct river_window_v1* obj, const char* title) {
-    Client* window = data;
-
-    free(window->title);
-    window->title = title == NULL ? NULL : strdup(title);
+    anvl_set_client_title(data, title);
 }
 void river_window_v1_parent(void* data, struct river_window_v1* obj, struct river_window_v1* parent) { }
 void river_window_v1_decoration_hint(void* data, struct river_window_v1* obj, uint32_t hint) { }
@@ -119,7 +119,9 @@ void river_window_v1_fullscreen_requested(
     void* data, struct river_window_v1* obj, struct river_output_v1* river_output) { }
 void river_window_v1_exit_fullscreen_requested(void* data, struct river_window_v1* obj) { }
 void river_window_v1_minimize_requested(void* data, struct river_window_v1* obj) { }
-void river_window_v1_unreliable_pid(void* data, struct river_window_v1* obj, int32_t unreliable_pid) { }
+void river_window_v1_unreliable_pid(void* data, struct river_window_v1* obj, int32_t unreliable_pid) {
+    anvl_set_client_pid(data, unreliable_pid);
+}
 void river_window_v1_presentation_hint(void* data, struct river_window_v1* obj, uint32_t hint) { }
 void river_window_v1_identifier(void* data, struct river_window_v1* obj, const char* indentifier) { }
 
@@ -163,6 +165,16 @@ void river_window_prepare(Client* window) {
     river_window_v1_use_ssd(window->river_window);
     river_window_v1_set_tiled(window->river_window, 15);
     river_window_hide(window);
+}
+void river_window_set_selected_border(Client* window, bool selected) {
+    river_window_v1_set_borders(
+        window->river_window,
+        selected ? 15 : 0,
+        selected ? selected_border_width : 0,
+        selected ? selected_border_r : 0,
+        selected ? selected_border_g : 0,
+        selected ? selected_border_b : 0,
+        selected ? UINT32_MAX : 0);
 }
 void river_focus_window(Seat* seat, Client* window) {
     river_seat_v1_focus_window(seat->river_seat, window->river_window);
@@ -269,6 +281,8 @@ void river_seat_v1_wl_seat(void* data, struct river_seat_v1* obj, uint32_t id) {
 void river_seat_v1_pointer_enter(void* data, struct river_seat_v1* obj, struct river_window_v1* river_window) {
     Seat* seat = data;
     Client* window = river_window_v1_get_user_data(river_window);
+    if (window->swallowed_by != NULL)
+        window = window->swallowed_by;
 
     focus_client(seat, window);
 }
@@ -280,6 +294,8 @@ void river_seat_v1_window_interaction(void* data, struct river_seat_v1* obj, str
     Client* window = seat->focused;
 
     window = river_window_v1_get_user_data(river_window);
+    if (window->swallowed_by != NULL)
+        window = window->swallowed_by;
 
     focus_client(seat, window);
 }

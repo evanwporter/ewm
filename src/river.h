@@ -19,6 +19,7 @@ void river_window_hide(Client* window);
 void river_window_move(Client* window, int x, int y);
 void river_window_resize(Client* window, int width, int height);
 void river_window_prepare(Client* window);
+void river_window_set_selected_border(Client* window, bool selected);
 
 void river_focus_window(Seat* seat, Client* window);
 void river_clear_focus(Seat* seat);

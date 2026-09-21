@@ -6,6 +6,24 @@ static const unsigned int gappx = 4; // 0 to disable gap
 static const float default_master_ratio = 0.55;
 static const unsigned int default_master_count = 1;
 static const bool lock_fullscreen = true;
+static const bool swallow_floating = false;
+/*
+ * Rules match substrings in Wayland's app_id and window title. A NULL filter
+ * does not participate in matching, and the last matching rule wins.
+ *
+ * app_id is normally the application ID from the client's .desktop file.
+ * Unlike X11, Wayland has no separate class and instance.
+ */
+static const Rule rules[] = {
+    { .app_id = "kitty", .isterminal = 1 },
+    { .app_id = "foot", .isterminal = 1 },
+    { .app_id = "st-256color", .isterminal = 1 },
+};
+/* The focused tiled client gets this compositor-drawn border when it has company. */
+static const int selected_border_width = 3;
+static const uint32_t selected_border_r = 0xe7e7e7e7U;
+static const uint32_t selected_border_g = 0x8a8a8a8aU;
+static const uint32_t selected_border_b = 0x3e3e3e3eU;
 static const bool show_bar = true;
 static const int barpx = 24;
 static const bool top_bar = false; // 0 means bottom bar

@@ -28,6 +28,13 @@ typedef struct Node Node;
 typedef struct Seat Seat;
 typedef struct Workspace Workspace;
 
+/* Wayland exposes an application ID and title, rather than X11's class and instance hints. */
+typedef struct {
+    const char* app_id;
+    const char* title;
+    int isterminal;
+} Rule;
+
 struct Client {
     struct river_window_v1* river_window;
     struct river_node_v1* river_node;
@@ -36,6 +43,7 @@ struct Client {
     /// The name holds the window title.
     char* name;
     char* title;
+    char* app_id;
 
     /// The client x, y coordinates and size (width, height).
     int x, y, w, h;
@@ -78,6 +86,7 @@ struct Client {
     Client* snext;
 
     Client* swallowing;
+    Client* swallowed_by;
 
     /// The output this client belongs to.
     Output* mon;
@@ -118,6 +127,8 @@ struct Workspace {
 
     Node* root;
     Node* focused;
+    /* Last client focused on this workspace; restored on workspace switches. */
+    Client* selected;
 
     Layout* lt;
     float master_ratio;
@@ -348,6 +359,9 @@ void monocle(Output* output);
 void manage_seat(Seat* seat);
 void anvl_add_window(Client* window);
 void anvl_remove_window(Client* window);
+void anvl_set_client_app_id(Client* client, const char* app_id);
+void anvl_set_client_title(Client* client, const char* title);
+void anvl_set_client_pid(Client* client, pid_t pid);
 void anvl_add_output(Output* output);
 void anvl_remove_output(Output* output);
 void anvl_output_position(Output* output, int x, int y);
