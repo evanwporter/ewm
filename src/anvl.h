@@ -79,8 +79,8 @@ struct Client {
 
     Client* swallowing;
 
-    /// The monitor this client belongs to.
-    Client* mon;
+    /// The output this client belongs to.
+    Output* mon;
 
     // /// The managed window that this client represents.
     // Client win;
@@ -376,11 +376,13 @@ void focus_prev_mon(Seat* seat, Arg* arg);
 void tag_next_mon(Seat* seat, Arg* arg);
 void tag_prev_mon(Seat* seat, Arg* arg);
 void exit_session(Seat* seat, Arg* arg);
+void focus_client(Seat* seat, Client* client);
+void focusstack(Seat* seat, Arg* arg);
 void focus_next(Seat* seat, Arg* arg);
 void focus_prev(Seat* esat, Arg* arg);
 void set_layout(Seat* seat, Arg* arg);
 void set_master_ratio(Seat* seat, Arg* arg);
-void inc_master_count(Seat* seat, Arg* arg);
+void incnmaster(Seat* seat, Arg* arg);
 void spawn(Seat* seat, Arg* arg);
 void view(Seat* seat, Arg* arg);
 void tag(Seat* seat, Arg* arg);

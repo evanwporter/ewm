@@ -270,7 +270,7 @@ void river_seat_v1_pointer_enter(void* data, struct river_seat_v1* obj, struct r
     Seat* seat = data;
     Client* window = river_window_v1_get_user_data(river_window);
 
-    seat->focused = window;
+    focus_client(seat, window);
 }
 
 void river_seat_v1_pointer_leave(void* data, struct river_seat_v1* obj) { }
@@ -281,7 +281,7 @@ void river_seat_v1_window_interaction(void* data, struct river_seat_v1* obj, str
 
     window = river_window_v1_get_user_data(river_window);
 
-    seat->focused = window;
+    focus_client(seat, window);
 }
 
 void river_seat_v1_shell_surface_interaction(

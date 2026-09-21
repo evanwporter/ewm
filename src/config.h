@@ -5,6 +5,7 @@
 static const unsigned int gappx = 4; // 0 to disable gap
 static const float default_master_ratio = 0.55;
 static const unsigned int default_master_count = 1;
+static const bool lock_fullscreen = true;
 static const bool show_bar = true;
 static const int barpx = 24;
 static const bool top_bar = false; // 0 means bottom bar
@@ -49,8 +50,8 @@ static Keys keybinds[] = {
     { SUPER, XKB_KEY_m, set_layout, { .v = &layouts[1] } },
     { SUPER, XKB_KEY_h, set_master_ratio, { .f = -0.05 } },
     { SUPER, XKB_KEY_l, set_master_ratio, { .f = 0.05 } },
-    { SUPER, XKB_KEY_i, inc_master_count, { .i = +1 } },
-    { SUPER, XKB_KEY_d, inc_master_count, { .i = -1 } },
+    { SUPER, XKB_KEY_i, incnmaster, { .i = +1 } },
+    { SUPER, XKB_KEY_d, incnmaster, { .i = -1 } },
     { SUPER, XKB_KEY_q, destroy_window, { 0 } },
     { SUPER | SHIFT, XKB_KEY_e, exit_session, { 0 } },
     { SUPER, XKB_KEY_j, focus_next, { 0 } },
