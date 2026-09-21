@@ -279,6 +279,9 @@ void river_seat_v1_wl_seat(void* data, struct river_seat_v1* obj, uint32_t id) {
 }
 
 void river_seat_v1_pointer_enter(void* data, struct river_seat_v1* obj, struct river_window_v1* river_window) {
+    if (!focus_follows_mouse)
+        return;
+
     Seat* seat = data;
     Client* window = river_window_v1_get_user_data(river_window);
     if (window->swallowed_by != NULL)

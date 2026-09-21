@@ -24,15 +24,20 @@ typedef struct WlOutput WlOutput;
 typedef struct Client Client;
 typedef struct Output Output;
 typedef struct Layout Layout;
-typedef struct Node Node;
 typedef struct Seat Seat;
 typedef struct Workspace Workspace;
+
+typedef struct {
+    const char* app_id;
+    const char** cmd;
+} Scratchpad;
 
 /* Wayland exposes an application ID and title, rather than X11's class and instance hints. */
 typedef struct {
     const char* app_id;
     const char* title;
     int isterminal;
+    unsigned int scratchpad;
 } Rule;
 
 struct Client {
@@ -77,9 +82,6 @@ struct Client {
     /// order in which clients are tiled.
     Client* next;
 
-    /* The leaf node representing this client in its monitor's tree layout. */
-    Node* node;
-
     /* The next client in the stacking order list, which is also a linked list. The stacking
      * order indicates which window is on top of others as well as the order in which clients
      * had focus. */
@@ -98,35 +100,10 @@ struct Client {
     char* icon;
 };
 
-typedef enum { HORIZONTAL,
-               VERTICAL,
-               UNSET } split_type_t;
-
-struct Node {
-    split_type_t split_type;
-    double split_ratio;
-
-    int x;
-    int y;
-
-    int width;
-    int height;
-
-    Client* window;
-
-    Node* first;
-    Node* second;
-    Node* parent;
-
-    Workspace* workspace;
-};
-
 struct Workspace {
     int n;
     const char* sym;
 
-    Node* root;
-    Node* focused;
     /* Last client focused on this workspace; restored on workspace switches. */
     Client* selected;
 
@@ -242,13 +219,11 @@ struct Output {
      * monitor. The next variable on the monitor refers to the next monitor in the list. */
     Output* next;
 
-    // /// The root of the tree tile display
-    // TreeNode *root;
-
     /* This is the bar window which is used to draw the bar. Each monitor has their own bar. */
     Client barwin;
 
-    Workspace* workspaces[9];
+    Workspace** workspaces;
+    size_t workspace_count;
 };
 
 struct WlOutput {
@@ -348,11 +323,7 @@ void spawn(Seat* seat, Arg* arg);
 void viewworkspace(Seat* seat, Arg* arg);
 void sendtoworkspace(Seat* seat, Arg* arg);
 void movetoworkspace(Seat* seat, Arg* arg);
-
-Node* create_node(Workspace* workspace, Client* window, Node* parent);
-void insert_node(Client* window, Node* root, Node* ref);
-void remove_node(Node* node);
-void propogate_layout(Node* root);
+void togglescratch(Seat* seat, Arg* arg);
 
 void tile(Output* output);
 void monocle(Output* output);

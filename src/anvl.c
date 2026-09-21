@@ -8,7 +8,6 @@
 #include <sys/mman.h>
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -42,8 +41,13 @@ static void attachclient(Output* output, Client* client);
 static void attachstack(Output* output, Client* client);
 static Client* firstvisible(Output* output);
 static Client* focused_or_firstvisible(Output* output);
+static bool client_is_managed(const Client* client);
 static void swallow(Client* client);
 static void update_selected_border(Output* output);
+
+static unsigned int scratchpad_workspace(unsigned int scratchpad) {
+    return LENGTH(workspace_names) + scratchpad;
+}
 
 void destroy_window(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
@@ -194,12 +198,19 @@ static Client* firstvisible(Output* output) {
     return NULL;
 }
 
+static bool client_is_managed(const Client* client) {
+    Client* candidate;
+
+    wl_list_for_each(candidate, &anvl.windows, link) if (candidate == client) return true;
+    return false;
+}
+
 /* Restore the workspace's last focused client when returning to it. */
 static Client* focused_or_firstvisible(Output* output) {
     Workspace* workspace = SELECTED_WORKSPACE(output);
     Client* client = workspace->selected;
 
-    if (client != NULL && client->mon == output && client->workspace == output->selected_workspace)
+    if (client_is_managed(client) && client->mon == output && client->workspace == output->selected_workspace)
         return client;
     return firstvisible(output);
 }
@@ -207,6 +218,9 @@ static Client* focused_or_firstvisible(Output* output) {
 void focus_client(Seat* seat, Client* client) {
     if (selmon == NULL)
         return;
+
+    if (!client_is_managed(client))
+        client = NULL;
 
     if (client != NULL && client->mon != selmon)
         selmon = client->mon;
@@ -267,7 +281,7 @@ void focus_prev(Seat* seat, Arg* arg) {
 }
 
 void viewworkspace(Seat* seat, Arg* arg) {
-    if (selmon == NULL || arg->u > LENGTH(workspace_names) || (arg->u != 0 && arg->u == selmon->selected_workspace))
+    if (selmon == NULL || arg->u > selmon->workspace_count || (arg->u != 0 && arg->u == selmon->selected_workspace))
         return;
 
     if (arg->u == 0) {
@@ -307,6 +321,30 @@ void spawn(Seat* seat, Arg* arg) {
         execvp(((char**)arg->v)[0], (char**)arg->v);
 }
 
+void togglescratch(Seat* seat, Arg* arg) {
+    if (selmon == NULL || arg->u >= LENGTH(scratchpads))
+        return;
+
+    unsigned int scratchpad = arg->u + 1;
+    unsigned int workspace = scratchpad_workspace(scratchpad);
+    Client* client;
+
+    for (client = selmon->clients; client != NULL && client->scratchpad != scratchpad; client = client->next)
+        ;
+
+    if (client == NULL) {
+        Arg command = { .v = scratchpads[arg->u].cmd };
+        spawn(seat, &command);
+    } else if (client->workspace == selmon->selected_workspace) {
+        Arg previous = { .u = 0 };
+        viewworkspace(seat, &previous);
+    } else {
+        Arg show = { .u = workspace };
+        viewworkspace(seat, &show);
+        focus_client(seat, client);
+    }
+}
+
 /*
  * Apply the available Wayland window metadata. app_id is the closest analogue
  * to an X11 class; there is no Wayland instance field. Keep scanning after a
@@ -314,12 +352,15 @@ void spawn(Seat* seat, Arg* arg) {
  */
 static void applyrules(Client* client) {
     client->isterminal = 0;
+    client->scratchpad = 0;
 
     for (size_t i = 0; i < LENGTH(rules); i++) {
         const Rule* rule = &rules[i];
 
-        if ((!rule->app_id || (client->app_id && strstr(client->app_id, rule->app_id))) && (!rule->title || (client->title && strstr(client->title, rule->title))))
+        if ((!rule->app_id || (client->app_id && strstr(client->app_id, rule->app_id))) && (!rule->title || (client->title && strstr(client->title, rule->title)))) {
             client->isterminal = rule->isterminal;
+            client->scratchpad = rule->scratchpad;
+        }
     }
 }
 
@@ -391,6 +432,19 @@ void anvl_set_client_app_id(Client* client, const char* app_id) {
     free(client->app_id);
     client->app_id = app_id == NULL ? NULL : strdup(app_id);
     applyrules(client);
+    if (client->scratchpad != 0 && client->mon != NULL) {
+        unsigned int workspace = scratchpad_workspace(client->scratchpad);
+        bool newly_matched = client->workspace != workspace;
+
+        client->workspace = workspace;
+        if (newly_matched && client->mon == selmon) {
+            selmon->previous_workspace = selmon->selected_workspace;
+            selmon->selected_workspace = workspace;
+
+            Seat* seat;
+            wl_list_for_each(seat, &anvl.seats, link) { focus_client(seat, client); }
+        }
+    }
     swallow(client);
 }
 
@@ -405,44 +459,6 @@ void anvl_set_client_pid(Client* client, pid_t pid) {
     client->pid = pid > 0 ? pid : 0;
     swallow(client);
 }
-
-void propogate_layout(Node* root) {
-    Node* queue[1 << 16];
-    uint32_t front = 0;
-    uint32_t back = 0;
-
-    queue[back++] = root;
-
-    Node* n;
-    while (front != back) {
-        n = queue[front++];
-        if (n->first != NULL && n->second != NULL) {
-            queue[back++] = n->first;
-            queue[back++] = n->second;
-            n->first->x = n->x;
-            n->first->y = n->y;
-            n->first->width = n->split_type == VERTICAL
-                ? n->width * n->split_ratio - (gappx >> 1)
-                : n->width;
-            n->first->height = n->split_type == HORIZONTAL
-                ? n->height * n->split_ratio - (gappx >> 1)
-                : n->height;
-
-            n->second->x = n->split_type == VERTICAL ? n->x + n->first->width + gappx : n->x;
-            n->second->y = n->split_type == HORIZONTAL ? n->y + n->first->height + gappx : n->y;
-            n->second->width = n->split_type == VERTICAL
-                ? n->width - n->first->width - gappx
-                : n->width;
-            n->second->height = n->split_type == HORIZONTAL
-                ? n->height - n->first->height - gappx
-                : n->height;
-        }
-    }
-}
-
-// TODO: reconsider how windows are treated here
-// Used for dragging
-// Used for dragging
 
 void anvl_add_window(Client* window) {
     window->mon = selmon;
@@ -465,7 +481,7 @@ void anvl_remove_window(Client* window) {
 
     Output* focused_output;
     wl_list_for_each(focused_output, &anvl.outputs, link) {
-        for (size_t i = 0; i < LENGTH(focused_output->workspaces); i++) {
+        for (size_t i = 0; i < focused_output->workspace_count; i++) {
             if (focused_output->workspaces[i]->selected == window)
                 focused_output->workspaces[i]->selected = NULL;
         }
@@ -495,10 +511,17 @@ void anvl_remove_window(Client* window) {
 void anvl_add_output(Output* output) {
     output->selected_workspace = 1;
     output->previous_workspace = 1;
-    for (int i = 0; i < LENGTH(workspace_names); i++) {
+    output->workspace_count = LENGTH(workspace_names) + LENGTH(scratchpads);
+    output->workspaces = calloc(output->workspace_count, sizeof(*output->workspaces));
+    if (output->workspaces == NULL)
+        return;
+
+    for (size_t i = 0; i < output->workspace_count; i++) {
         Workspace* workspace = calloc(1, sizeof(Workspace));
+        if (workspace == NULL)
+            continue;
         workspace->n = i;
-        workspace->sym = workspace_names[i];
+        workspace->sym = i < LENGTH(workspace_names) ? workspace_names[i] : scratchpads[i - LENGTH(workspace_names)].app_id;
         workspace->lt = &layouts[0];
         workspace->master_ratio = default_master_ratio;
         workspace->master_count = default_master_count;
@@ -512,9 +535,10 @@ void anvl_add_output(Output* output) {
 
 void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
-    for (int i = 0; i < LENGTH(output->workspaces); i++) {
+    for (size_t i = 0; i < output->workspace_count; i++) {
         free(output->workspaces[i]);
     }
+    free(output->workspaces);
     if (selmon == output)
         selmon = NULL;
     free(output);

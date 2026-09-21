@@ -6,6 +6,8 @@ static const unsigned int gappx = 4; // 0 to disable gap
 static const float default_master_ratio = 0.55;
 static const unsigned int default_master_count = 1;
 static const bool lock_fullscreen = true;
+/* Focus a window when the pointer enters it. */
+static const bool focus_follows_mouse = true;
 static const bool swallow_floating = false;
 /*
  * Rules match substrings in Wayland's app_id and window title. A NULL filter
@@ -18,6 +20,7 @@ static const Rule rules[] = {
     { .app_id = "kitty", .isterminal = 1 },
     { .app_id = "foot", .isterminal = 1 },
     { .app_id = "st-256color", .isterminal = 1 },
+    { .app_id = "spotify", .scratchpad = 1 },
 };
 /* The focused tiled client gets this compositor-drawn border when it has company. */
 static const int selected_border_width = 3;
@@ -33,6 +36,16 @@ static const char* status_time_format = "%a, %d %b %H:%M";
 static const char* kb_layout = "us";
 
 static const char* workspace_names[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+
+/*
+ * Scratchpads are persistent applications on dedicated, unlabelled workspaces.
+ * Their matching rule uses a one-based scratchpad identifier, while the
+ * togglescratch key binding uses a zero-based index into this array.
+ */
+static const char* spotifycmd[] = { "spotify", NULL };
+static const Scratchpad scratchpads[] = {
+    { "spotify", spotifycmd },
+};
 
 static Layout layouts[] = {
     { "[]=", tile }, // First entry is default
@@ -64,6 +77,7 @@ static Keys keybinds[] = {
     { SUPER, XKB_KEY_Return, spawn, { .v = termcmd } },
     { SUPER | SHIFT, XKB_KEY_c, spawn, { .v = reloadcmd } },
     { SUPER, XKB_KEY_space, spawn, { .v = menucmd } },
+    { SUPER, XKB_KEY_s, togglescratch, { .u = 0 } },
     { SUPER, XKB_KEY_t, setlayout, { .v = &layouts[0] } },
     { SUPER, XKB_KEY_m, setlayout, { .v = &layouts[1] } },
     { SUPER, XKB_KEY_h, setmfact, { .f = -0.05 } },
