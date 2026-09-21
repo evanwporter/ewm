@@ -548,7 +548,8 @@ void anvl_output_position(Output* output, int x, int y) {
     output->mx = x;
     output->my = y;
     output->wx = x + gappx;
-    output->wy = y + (show_bar && top_bar ? barpx : 0) + gappx;
+    /* Keep outer gaps, but let tiled windows meet the bar directly. */
+    output->wy = y + (show_bar && top_bar ? barpx : 0) + (show_bar && top_bar ? 0 : gappx);
 }
 
 void anvl_output_dimensions(Output* output, int width, int height) {
@@ -557,7 +558,7 @@ void anvl_output_dimensions(Output* output, int width, int height) {
     output->mw = width;
     output->mh = height;
     output->ww = width - 2 * gappx;
-    output->wh = height - (show_bar ? barpx : 0) - 2 * gappx;
+    output->wh = height - (show_bar ? barpx : 0) - gappx - (show_bar && !top_bar ? 0 : gappx);
 }
 
 void anvl_manage(void) {

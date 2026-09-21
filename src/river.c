@@ -340,7 +340,6 @@ const struct river_layer_shell_output_v1_listener layer_shell_output_listener = 
     .non_exclusive_area = river_layer_shell_output_v1_non_exclusive_area,
 };
 
-const struct wl_callback_listener wl_surface_frame_listener;
 void river_window_manager_v1_unavailable(void* data, struct river_window_manager_v1* obj) {
     fprintf(stderr, "error: Unavailable.\n");
     exit(1);
@@ -362,20 +361,6 @@ void river_window_manager_v1_render_start(void* data, struct river_window_manage
 
     river_window_manager_v1_render_finish(window_manager);
 }
-
-void wl_surface_frame_done(void* data, struct wl_callback* cb, uint32_t time) {
-    wl_callback_destroy(cb);
-
-    WlOutput* output = data;
-    cb = wl_surface_frame(output->surface);
-    wl_callback_add_listener(cb, &wl_surface_frame_listener, output);
-
-    render_bar(output);
-}
-
-const struct wl_callback_listener wl_surface_frame_listener = {
-    .done = wl_surface_frame_done,
-};
 
 void zwlr_layer_surface_v1_configure(
     void* data, struct zwlr_layer_surface_v1* zwlr_layer_surface_v1, uint32_t serial, uint32_t width, uint32_t height) {
@@ -644,9 +629,6 @@ void wl_output_done(void* data, struct wl_output* wl_output) {
 
     zwlr_layer_surface_v1_add_listener(output->layer_surface, &layer_surface_listener, output);
     wl_surface_commit(output->surface);
-
-    struct wl_callback* cb = wl_surface_frame(output->surface);
-    wl_callback_add_listener(cb, &wl_surface_frame_listener, output);
 }
 
 void wl_output_scale(void* data, struct wl_output* wl_output, int32_t factor) {
