@@ -2,7 +2,10 @@
 #include <river-window-management-v1-client-protocol.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
-static const unsigned int gappx = 4; // 0 to disable gap
+// Keep tiled windows flush with the output; borders provide their separation.
+static const unsigned int gappx = 0;
+static const int borderpx = 2;
+static const uint32_t border_rgba[] = { 0x89b4fa, 0x89b4fa, 0x89b4fa, 0xffffffff };
 static const bool show_bar = true;
 static const int barpx = 24;
 static const bool top_bar = false; // 0 means bottom bar

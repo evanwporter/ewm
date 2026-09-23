@@ -164,6 +164,10 @@ void river_window_prepare(Window* window) {
     river_window_v1_set_tiled(window->river_window, 15);
     river_window_hide(window);
 }
+void river_window_set_borders(Window* window) {
+    river_window_v1_set_borders(
+        window->river_window, 15, borderpx, border_rgba[0], border_rgba[1], border_rgba[2], border_rgba[3]);
+}
 void river_focus_window(Seat* seat, Window* window) {
     river_seat_v1_focus_window(seat->river_seat, window->river_window);
 }
@@ -338,6 +342,9 @@ void river_window_manager_v1_manage_start(void* data, struct river_window_manage
 }
 
 void river_window_manager_v1_render_start(void* data, struct river_window_manager_v1* obj) {
+    Window* window;
+    wl_list_for_each(window, &anvl.windows, link) { river_window_set_borders(window); }
+
     WlOutput* output;
     wl_list_for_each(output, &anvl.wl_outputs, link) { render_bar(output); }
 
