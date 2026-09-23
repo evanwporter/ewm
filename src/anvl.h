@@ -1,6 +1,7 @@
 #ifndef ANVLH
 #define ANVLH
 
+#include <stdint.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 
@@ -21,7 +22,6 @@ typedef struct WlOutput WlOutput;
 typedef struct Window Window;
 typedef struct Output Output;
 typedef struct Layout Layout;
-typedef struct Node Node;
 typedef struct Seat Seat;
 typedef struct Tag Tag;
 
@@ -38,38 +38,15 @@ struct Window {
     int width;
     int height;
 
-    Node* node;
-};
-
-typedef enum { HORIZONTAL,
-               VERTICAL,
-               UNSET } split_type_t;
-
-struct Node {
-    split_type_t split_type;
-    double split_ratio;
-
-    int x;
-    int y;
-
-    int width;
-    int height;
-
-    Window* window;
-
-    Node* first;
-    Node* second;
-    Node* parent;
-
-    Tag* tag;
+    uint32_t tag;
+    Output* mon;
 };
 
 struct Tag {
     int n;
     const char* sym;
 
-    Node* root;
-    Node* focused;
+    Window* focused;
 
     Layout* lt;
 };
@@ -181,11 +158,6 @@ void set_layout(Seat* seat, Arg* arg);
 void spawn(Seat* seat, Arg* arg);
 void view(Seat* seat, Arg* arg);
 void tag(Seat* seat, Arg* arg);
-
-Node* create_node(Tag* tag, Window* window, Node* parent);
-void insert_node(Window* window, Node* root, Node* ref);
-void remove_node(Node* node);
-void propogate_layout(Node* root);
 
 void tile(Output* output);
 void monocle(Output* output);

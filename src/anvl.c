@@ -64,23 +64,35 @@ void focus_prev_mon(Seat* seat, Arg* arg) {
 }
 
 void tag_next_mon(Seat* seat, Arg* arg) {
-    if (selmon != NULL && seat->focused != NULL) {
-        Output* next = wl_container_of(selmon->link.next, selmon, link);
-        if (next != NULL && &next->link != &anvl.outputs) {
-            remove_node(seat->focused->node);
-            insert_node(seat->focused, next->tags[next->seltag]->root, next->tags[next->seltag]->focused);
-        }
-    }
+    if (selmon == NULL || seat->focused == NULL)
+        return;
+
+    Output* next = wl_container_of(selmon->link.next, next, link);
+
+    if (&next->link == &anvl.outputs)
+        return;
+
+    seat->focused->mon = next;
+    seat->focused->tag = next->seltag;
+
+    next->tags[next->seltag]->focused = seat->focused;
 }
 
 void tag_prev_mon(Seat* seat, Arg* arg) {
-    if (selmon != NULL && seat->focused != NULL) {
-        Output* prev = wl_container_of(selmon->link.prev, selmon, link);
-        if (prev != NULL && &prev->link != &anvl.outputs) {
-            remove_node(seat->focused->node);
-            insert_node(seat->focused, prev->tags[prev->seltag]->root, prev->tags[prev->seltag]->focused);
-        }
-    }
+    if (selmon == NULL || seat->focused == NULL)
+        return;
+
+    Output* prev = wl_container_of(selmon->link.prev, prev, link);
+
+    if (&prev->link == &anvl.outputs)
+        return;
+
+    Window* window = seat->focused;
+
+    window->mon = prev;
+    window->tag = prev->seltag;
+
+    prev->tags[prev->seltag]->focused = window;
 }
 
 void exit_session(Seat* seat, Arg* arg) {
@@ -122,10 +134,15 @@ void view(Seat* seat, Arg* arg) {
 }
 
 void tag(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL) {
-        remove_node(seat->focused->node);
-        insert_node(seat->focused, selmon->tags[arg->u]->root, selmon->tags[arg->u]->focused);
-    }
+    if (seat->focused == NULL || selmon == NULL)
+        return;
+
+    Window* window = seat->focused;
+
+    window->mon = selmon;
+    window->tag = arg->u;
+
+    selmon->tags[arg->u]->focused = window;
 }
 
 void spawn(Seat* seat, Arg* arg) {
@@ -133,127 +150,23 @@ void spawn(Seat* seat, Arg* arg) {
         execvp(((char**)arg->v)[0], (char**)arg->v);
 }
 
-Node* create_node(Tag* tag, Window* window, Node* parent) {
-    Node* node = calloc(1, sizeof(Node));
-    node->tag = tag;
-    node->split_type = UNSET;
-    node->split_ratio = 0.5;
-    node->window = window;
-    node->first = node->second = NULL;
-    node->parent = parent;
-
-    return node;
-}
-
-// Insert window after ref, which has to be a leaf node with a window attached,
-// by splitting it If ref is NULL, the tree is assumed to be empty and window is
-// inserted on root
-void insert_node(Window* window, Node* root, Node* ref) {
-    if (ref == NULL) {
-        root->window = window;
-        window->node = root;
-        root->tag->focused = root;
-    } else {
-        Window* ref_window = ref->window;
-        ref->window = NULL;
-
-        if (ref->split_type == UNSET) {
-            if (ref->width >= ref->height)
-                ref->split_type = VERTICAL;
-            else
-                ref->split_type = HORIZONTAL;
-        }
-
-        Node* first = create_node(root->tag, ref_window, ref);
-        ref_window->node = first;
-
-        Node* second = create_node(root->tag, window, ref);
-        window->node = second;
-
-        ref->first = first;
-        ref->second = second;
-        root->tag->focused = second;
-    }
-}
-
-void remove_node(Node* node) {
-    Node* parent = node->parent;
-    if (parent == NULL) {
-        node->tag->focused = NULL;
-        node->split_type = UNSET;
-        node->split_ratio = 0.5;
-        node->window = NULL;
-    } else {
-        Node* sibling = parent->first != node ? parent->first : parent->second;
-
-        parent->split_type = sibling->split_type;
-        parent->split_ratio = sibling->split_ratio;
-        parent->first = sibling->first;
-        if (parent->first != NULL)
-            parent->first->parent = parent;
-        parent->second = sibling->second;
-        if (parent->second != NULL)
-            parent->second->parent = parent;
-        parent->window = sibling->window;
-        if (parent->window != NULL)
-            parent->window->node = parent;
-
-        free(node);
-        free(sibling);
-        // TODO: at this point focused is now invalid, it does not seem as if this
-        // is a problem
-        //  as it is reassigned on the following manage sequence, however this
-        //  should still be fixed.
-    }
-}
-
-void propogate_layout(Node* root) {
-    Node* queue[1 << 16];
-    uint32_t front = 0;
-    uint32_t back = 0;
-
-    queue[back++] = root;
-
-    Node* n;
-    while (front != back) {
-        n = queue[front++];
-        if (n->first != NULL && n->second != NULL) {
-            queue[back++] = n->first;
-            queue[back++] = n->second;
-
-            n->first->x = n->x;
-            n->first->y = n->y;
-            n->first->width = n->split_type == VERTICAL
-                ? n->width * n->split_ratio - (gappx >> 1)
-                : n->width;
-            n->first->height = n->split_type == HORIZONTAL
-                ? n->height * n->split_ratio - (gappx >> 1)
-                : n->height;
-
-            n->second->x = n->split_type == VERTICAL ? n->x + n->first->width + gappx : n->x;
-            n->second->y = n->split_type == HORIZONTAL ? n->y + n->first->height + gappx : n->y;
-            n->second->width = n->split_type == VERTICAL
-                ? n->width - n->first->width - gappx
-                : n->width;
-            n->second->height = n->split_type == HORIZONTAL
-                ? n->height - n->first->height - gappx
-                : n->height;
-        }
-    }
-}
-
 // TODO: reconsider how windows are treated here
 // Used for dragging
 // Used for dragging
 
 void anvl_add_window(Window* window) {
-    Tag* tag = selmon->tags[selmon->seltag];
+    window->mon = selmon;
+    window->tag = selmon->seltag;
 
-    insert_node(window, tag->root, tag->focused);
     wl_list_insert(&anvl.windows, &window->link);
 
+    Tag* tag = selmon->tags[selmon->seltag];
+    tag->focused = window;
+
     Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) { seat->focused = window; }
+    wl_list_for_each(seat, &anvl.seats, link) {
+        seat->focused = window;
+    }
 }
 
 void anvl_remove_window(Window* window) {
@@ -263,7 +176,13 @@ void anvl_remove_window(Window* window) {
             seat->focused = NULL;
     }
 
-    remove_node(window->node);
+    if (window->mon != NULL) {
+        Tag* tag = window->mon->tags[window->tag];
+
+        if (tag->focused == window)
+            tag->focused = NULL;
+    }
+
     wl_list_remove(&window->link);
 }
 
@@ -271,10 +190,12 @@ void anvl_add_output(Output* output) {
     output->seltag = 0;
     for (int i = 0; i < LENGTH(tags); i++) {
         Tag* tag = calloc(1, sizeof(Tag));
+
         tag->n = i;
         tag->sym = tags[i];
-        tag->root = create_node(tag, NULL, NULL);
+        tag->focused = NULL;
         tag->lt = &layouts[0];
+
         output->tags[i] = tag;
     }
 
@@ -285,44 +206,30 @@ void anvl_add_output(Output* output) {
 
 void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        Tag* tag = output->tags[i];
-        Node* queue[1 << 16];
-        uint32_t front = 0, back = 0;
-        queue[back++] = tag->root;
-        while (front != back) {
-            Node* node = queue[front++];
-            if (node->first != NULL && node->second != NULL) {
-                queue[back++] = node->first;
-                queue[back++] = node->second;
-            } else if (node->window != NULL) {
-                node->window->node = NULL;
-            }
-            free(node);
-        }
-        free(tag);
+
+    Window* window;
+    wl_list_for_each(window, &anvl.windows, link) {
+        if (window->mon == output)
+            window->mon = NULL;
     }
+
+    for (int i = 0; i < LENGTH(output->tags); i++)
+        free(output->tags[i]);
+
     if (selmon == output)
         selmon = NULL;
+
     free(output);
 }
 
 void anvl_output_position(Output* output, int x, int y) {
     output->x = x;
     output->y = y;
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        output->tags[i]->root->x = x + gappx;
-        output->tags[i]->root->y = y + (show_bar && top_bar ? barpx : 0) + gappx;
-    }
 }
 
 void anvl_output_dimensions(Output* output, int width, int height) {
     output->width = width;
     output->height = height;
-    for (int i = 0; i < LENGTH(output->tags); i++) {
-        output->tags[i]->root->width = width - 2 * gappx;
-        output->tags[i]->root->height = height - (show_bar ? barpx : 0) - gappx;
-    }
 }
 
 void anvl_manage(void) {
@@ -336,8 +243,6 @@ void anvl_manage(void) {
 
     Output* output;
     wl_list_for_each(output, &anvl.outputs, link) {
-        for (int i = 0; i < LENGTH(output->tags); i++)
-            propogate_layout(output->tags[i]->root);
         output->tags[output->seltag]->lt->manage(output);
     }
 }
@@ -350,51 +255,78 @@ void manage_seat(Seat* seat) {
     if (seat->focused != NULL) {
         river_focus_window(seat, seat->focused);
         river_raise_window(seat->focused);
-        seat->focused->node->tag->focused = seat->focused->node;
+
+        seat->focused->mon
+            ->tags[seat->focused->tag]
+            ->focused = seat->focused;
     } else {
         river_clear_focus(seat);
     }
 }
 
 void tile(Output* output) {
-    Node* queue[1 << 16];
-    uint32_t front = 0;
-    uint32_t back = 0;
+    uint32_t n = 0;
 
-    queue[back++] = output->tags[output->seltag]->root;
+    Window* window;
+    wl_list_for_each(window, &anvl.windows, link) {
+        if (window->mon == output && window->tag == output->seltag)
+            n++;
+    }
 
-    Node* n;
-    while (front != back) {
-        n = queue[front++];
-        if (n->first != NULL && n->second != NULL) {
-            queue[back++] = n->first;
-            queue[back++] = n->second;
-        } else if (n->window != NULL) {
-            river_window_show(n->window);
-            river_window_resize(n->window, n->window->node->width, n->window->node->height);
-            river_window_move(n->window, n->window->node->x, n->window->node->y);
-        }
+    if (n == 0)
+        return;
+
+    int x = output->x + gappx;
+    int y = output->y + (show_bar && top_bar ? barpx : 0) + gappx;
+
+    int width = output->width - 2 * gappx;
+    int height = output->height
+        - (show_bar ? barpx : 0)
+        - 2 * gappx;
+
+    int window_width = (width - (n - 1) * gappx) / n;
+
+    uint32_t i = 0;
+
+    wl_list_for_each(window, &anvl.windows, link) {
+        if (window->mon != output || window->tag != output->seltag)
+            continue;
+
+        int wx = x + i * (window_width + gappx);
+
+        /*
+         * Give rounding remainder to final window.
+         */
+        int ww = i == n - 1
+            ? x + width - wx
+            : window_width;
+
+        river_window_show(window);
+        river_window_move(window, wx, y);
+        river_window_resize(window, ww, height);
+
+        i++;
     }
 }
 
 void monocle(Output* output) {
-    Node* queue[1 << 16];
-    uint32_t front = 0;
-    uint32_t back = 0;
+    Window* window;
 
-    queue[back++] = output->tags[output->seltag]->root;
+    wl_list_for_each(window, &anvl.windows, link) {
+        if (window->mon != output || window->tag != output->seltag)
+            continue;
 
-    Node* n;
-    while (front != back) {
-        n = queue[front++];
-        if (n->first != NULL && n->second != NULL) {
-            queue[back++] = n->first;
-            queue[back++] = n->second;
-        } else if (n->window != NULL) {
-            river_window_show(n->window);
-            river_window_move(n->window, output->x, output->y + (show_bar && top_bar ? barpx : 0));
-            river_window_resize(n->window, output->width, output->height - (show_bar ? barpx : 0));
-        }
+        river_window_show(window);
+
+        river_window_move(
+            window,
+            output->x,
+            output->y + (show_bar && top_bar ? barpx : 0));
+
+        river_window_resize(
+            window,
+            output->width,
+            output->height - (show_bar ? barpx : 0));
     }
 }
 
