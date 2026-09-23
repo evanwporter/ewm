@@ -54,7 +54,7 @@ void river_output_v1_wl_output(void* data, struct river_output_v1* obj, uint32_t
     Output* output = data;
 
     WlOutput* wl_output;
-    wl_list_for_each(wl_output, &anvl.wl_outputs, link) {
+    wl_list_for_each(wl_output, &ewm.wl_outputs, link) {
         if (wl_output->name == name) {
             wl_output->output = output;
             wl_output->done = true;
@@ -297,7 +297,7 @@ void river_seat_v1_op_release(void* data, struct river_seat_v1* obj) {
 }
 void river_seat_v1_pointer_position(void* data, struct river_seat_v1* obj, int32_t x, int32_t y) {
     Output* output;
-    wl_list_for_each(output, &anvl.outputs, link) {
+    wl_list_for_each(output, &ewm.outputs, link) {
         if (x >= output->x && x < output->x + output->width && y >= output->y && y < output->y + output->height) {
             selmon = output;
             river_layer_shell_output_v1_set_default(output->river_layer_shell);
@@ -345,14 +345,14 @@ void river_window_manager_v1_manage_start(void* data, struct river_window_manage
 
 void river_window_manager_v1_render_start(void* data, struct river_window_manager_v1* obj) {
     Client* window;
-    wl_list_for_each(window, &anvl.windows, link) {
+    wl_list_for_each(window, &ewm.windows, link) {
         bool focused = window->mon != NULL
             && window == window->mon->tags[window->tag]->focused;
         river_window_set_borders(window, focused);
     }
 
     WlOutput* output;
-    wl_list_for_each(output, &anvl.wl_outputs, link) { render_bar(output); }
+    wl_list_for_each(output, &ewm.wl_outputs, link) { render_bar(output); }
 
     river_window_manager_v1_render_finish(window_manager);
 }
@@ -432,7 +432,7 @@ void river_window_manager_v1_seat(void* data, struct river_window_manager_v1* ob
     wl_list_init(&seat->buttons);
 
     river_seat_v1_add_listener(seat->river_seat, &seat_listener, seat);
-    wl_list_insert(&anvl.seats, &seat->link);
+    wl_list_insert(&ewm.seats, &seat->link);
 
     for (int i = 0; i < LENGTH(keybinds); i++) {
         xkb_binding_create(seat, keybinds[i].mods, keybinds[i].key, keybinds[i].func, &keybinds[i].arg);
@@ -522,7 +522,7 @@ void river_xkb_config_v1_xkb_keyboard(
     Keyboard* keyboard = calloc(1, sizeof(Keyboard));
     keyboard->river_xkb_keyboard = id;
 
-    wl_list_insert(&anvl.keyboards, &keyboard->link);
+    wl_list_insert(&ewm.keyboards, &keyboard->link);
     river_xkb_keyboard_v1_add_listener(id, &xkb_keyboard_listener, keyboard);
 
     if (xkb_keymap) {
@@ -550,7 +550,7 @@ struct river_xkb_keymap_v1* create_keymap() {
         keymap, XKB_KEYMAP_FORMAT_TEXT_V2, XKB_KEYMAP_SERIALIZE_NO_FLAGS);
     xkb_keymap_unref(keymap);
     int keymap_str_len = strlen(keymap_str) + 1;
-    int keymap_fd = memfd_create("anvl-keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    int keymap_fd = memfd_create("ewm-keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (keymap_fd == -1 || ftruncate(keymap_fd, keymap_str_len) < 0) {
         fprintf(stderr, "Failed to create or truncate mem fd\n");
         close(keymap_fd);
@@ -589,7 +589,7 @@ struct river_xkb_keymap_v1* create_keymap() {
 void river_xkb_keymap_v1_success(
     void* data, struct river_xkb_keymap_v1* river_xkb_keymap_v1) {
     Keyboard* keyboard;
-    wl_list_for_each(keyboard, &anvl.keyboards, link) {
+    wl_list_for_each(keyboard, &ewm.keyboards, link) {
         river_xkb_keyboard_v1_set_keymap(keyboard->river_xkb_keyboard, xkb_keymap);
     }
 }
@@ -699,7 +699,7 @@ void wl_registry_global(void* data, struct wl_registry* registry, uint32_t name,
         output->name = name;
         output->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 4);
         wl_output_add_listener(output->wl_output, &wl_output_listener, output);
-        wl_list_insert(&anvl.wl_outputs, &output->link);
+        wl_list_insert(&ewm.wl_outputs, &output->link);
     }
 
     if (strcmp(interface, river_layer_shell_v1_interface.name) == 0) {

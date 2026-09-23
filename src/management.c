@@ -18,7 +18,7 @@
 
 #include <fcft/fcft.h>
 
-#include "anvl.h"
+#include "ewm.h"
 #include "config.h"
 #include "river.h"
 
@@ -60,14 +60,14 @@ void anvl_add_window(Client* window) {
     window->tag = selmon->seltag;
 
     wl_list_init(&window->focus_link);
-    wl_list_insert(&anvl.windows, &window->link);
+    wl_list_insert(&ewm.windows, &window->link);
     wl_list_insert(&selmon->focus_stack, &window->focus_link);
 
     Tag* tag = selmon->tags[selmon->seltag];
     tag->focused = window;
 
     Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) {
+    wl_list_for_each(seat, &ewm.seats, link) {
         anvl_focus_client(seat, window);
     }
 }
@@ -80,7 +80,7 @@ void anvl_add_window(Client* window) {
  */
 void anvl_remove_window(Client* window) {
     Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) {
+    wl_list_for_each(seat, &ewm.seats, link) {
         if (seat->focused == window)
             seat->focused = NULL;
     }
@@ -118,7 +118,7 @@ void anvl_add_output(Output* output) {
         output->tags[i] = tag;
     }
 
-    wl_list_insert(&anvl.outputs, &output->link);
+    wl_list_insert(&ewm.outputs, &output->link);
     if (selmon == NULL)
         selmon = output;
 }
@@ -133,9 +133,20 @@ void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
 
     Client* client;
-    wl_list_for_each(client, &anvl.windows, link) {
-        if (client->mon == output)
+    wl_list_for_each(client, &ewm.windows, link) {
+        if (client->mon == output) {
+            /* focus_link is owned by the output's focus_stack.  It has to be
+             * detached before output (and that list head) is freed. */
+            wl_list_remove(&client->focus_link);
+            wl_list_init(&client->focus_link);
             client->mon = NULL;
+        }
+    }
+
+    Seat* seat;
+    wl_list_for_each(seat, &ewm.seats, link) {
+        if (seat->focused != NULL && seat->focused->mon == NULL)
+            seat->focused = NULL;
     }
 
     for (int i = 0; i < LENGTH(output->tags); i++)
@@ -166,15 +177,15 @@ void anvl_output_dimensions(Output* output, int width, int height) {
  */
 void anvl_manage(void) {
     Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
+    wl_list_for_each(seat, &ewm.seats, link) { manage_seat(seat); }
 
     Client* client;
-    wl_list_for_each(client, &anvl.windows, link) {
+    wl_list_for_each(client, &ewm.windows, link) {
         river_window_prepare(client);
     }
 
     Output* output;
-    wl_list_for_each(output, &anvl.outputs, link) {
+    wl_list_for_each(output, &ewm.outputs, link) {
         output->tags[output->seltag]->lt->manage(output);
     }
 }

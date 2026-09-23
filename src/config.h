@@ -1,4 +1,4 @@
-#include "anvl.h"
+#include "ewm.h"
 #include <river-window-management-v1-client-protocol.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
@@ -31,7 +31,7 @@ static Layout layouts[] = {
     { SUPER, KEY, view, { .u = TAG } }, { SUPER | SHIFT, KEY, tag, { .u = TAG } },
 
 static const char* termcmd[] = { "kitty", NULL };
-static const char* reloadcmd[] = { "sh", "-c", "pkill -x anvl; exec anvl", NULL };
+static const char* reloadcmd[] = { "sh", "-c", "pkill -x ewm; exec ewm", NULL };
 static const char* menucmd[] = {
     "bemenu-run",
     "-l",

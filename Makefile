@@ -1,13 +1,13 @@
 CC ?= cc
 
-MAIN := anvl
+MAIN := ewm
 
 SRC_DIR := src
 BUILD_DIR := build
 PROTO_DIR := protocol
 
 SRC := \
-	$(SRC_DIR)/anvl.c \
+	$(SRC_DIR)/ewm.c \
 	$(SRC_DIR)/river.c \
 	$(SRC_DIR)/management.c \
 	$(SRC_DIR)/bar.c \

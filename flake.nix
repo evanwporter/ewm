@@ -1,5 +1,5 @@
 {
-	description = "anvl development shell";
+	description = "ewm development shell";
 
 	inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

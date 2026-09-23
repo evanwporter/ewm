@@ -23,7 +23,7 @@
 
 #include <fcft/fcft.h>
 
-#include "anvl.h"
+#include "ewm.h"
 #include "config.h"
 #include "river.h"
 #include "status.h"
@@ -266,7 +266,7 @@ void render_bar(WlOutput* output) {
     unsigned int occ = 0;
 
     Client* window;
-    wl_list_for_each(window, &anvl.windows, link) {
+    wl_list_for_each(window, &ewm.windows, link) {
         if (window->mon == output->output)
             occ |= 1U << window->tag;
     }
@@ -295,7 +295,7 @@ void render_bar(WlOutput* output) {
      * not dwm's icon or scratchpad metadata, so tabs are the direct equivalent
      * of the title portion of dwm's bar. */
     int n = 0;
-    wl_list_for_each(window, &anvl.windows, link) {
+    wl_list_for_each(window, &ewm.windows, link) {
         if (window->mon == output->output && window->tag == output->output->seltag)
             n++;
     }
@@ -316,14 +316,14 @@ void render_bar(WlOutput* output) {
     if ((textw = w - statusw - x) > h && n > 0) {
         int remainder = textw % n;
         int tabw = textw / n;
-        wl_list_for_each(window, &anvl.windows, link) {
+        wl_list_for_each(window, &ewm.windows, link) {
             if (window->mon != output->output || window->tag != output->output->seltag)
                 continue;
 
             int tab_width = tabw + (remainder-- > 0 ? 1 : 0);
             bool selected = false;
             Seat* seat;
-            wl_list_for_each(seat, &anvl.seats, link) {
+            wl_list_for_each(seat, &ewm.seats, link) {
                 if (seat->focused == window) {
                     selected = true;
                     break;

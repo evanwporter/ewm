@@ -159,7 +159,7 @@ typedef struct {
     Arg* arg;
 } Button;
 
-extern WindowManager anvl;
+extern WindowManager ewm;
 extern Output* selmon;
 
 typedef struct {
