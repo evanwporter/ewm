@@ -52,10 +52,6 @@ static Keys keybinds[] = {
     { SUPER | SHIFT, XKB_KEY_e, exit_session, { 0 } },
     { SUPER, XKB_KEY_j, focus_next, { 0 } },
     { SUPER, XKB_KEY_k, focus_prev, { 0 } },
-    { SUPER, XKB_KEY_period, focus_next_mon, { 0 } },
-    { SUPER, XKB_KEY_comma, focus_prev_mon, { 0 } },
-    { SUPER | SHIFT, XKB_KEY_period, tag_next_mon, { 0 } },
-    { SUPER | SHIFT, XKB_KEY_comma, tag_prev_mon, { 0 } },
     TAGKEY(XKB_KEY_1, 0) TAGKEY(XKB_KEY_2, 1) TAGKEY(XKB_KEY_3, 2)
         TAGKEY(XKB_KEY_4, 3) TAGKEY(XKB_KEY_5, 4) TAGKEY(XKB_KEY_6, 5)
             TAGKEY(XKB_KEY_7, 6) TAGKEY(XKB_KEY_8, 7) TAGKEY(XKB_KEY_9, 8)

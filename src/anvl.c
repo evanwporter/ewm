@@ -35,70 +35,19 @@
 WindowManager anvl;
 Output* selmon = NULL;
 
+/* Close the currently focused window, if one exists. */
 void destroy_window(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
         river_window_close(seat->focused);
     }
 }
 
-void focus_next_mon(Seat* seat, Arg* arg) {
-    if (selmon != NULL) {
-        Output* next = wl_container_of(selmon->link.next, selmon, link);
-        if (next != NULL && &next->link != &anvl.outputs) {
-            selmon = next;
-            river_select_output(selmon);
-            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
-        }
-    }
-}
-
-void focus_prev_mon(Seat* seat, Arg* arg) {
-    if (selmon != NULL) {
-        Output* prev = wl_container_of(selmon->link.prev, selmon, link);
-        if (prev != NULL && &prev->link != &anvl.outputs) {
-            selmon = prev;
-            river_select_output(selmon);
-            river_pointer_warp(seat, selmon->x + selmon->width / 2, selmon->y + selmon->height / 2);
-        }
-    }
-}
-
-void tag_next_mon(Seat* seat, Arg* arg) {
-    if (selmon == NULL || seat->focused == NULL)
-        return;
-
-    Output* next = wl_container_of(selmon->link.next, next, link);
-
-    if (&next->link == &anvl.outputs)
-        return;
-
-    seat->focused->mon = next;
-    seat->focused->tag = next->seltag;
-
-    next->tags[next->seltag]->focused = seat->focused;
-}
-
-void tag_prev_mon(Seat* seat, Arg* arg) {
-    if (selmon == NULL || seat->focused == NULL)
-        return;
-
-    Output* prev = wl_container_of(selmon->link.prev, prev, link);
-
-    if (&prev->link == &anvl.outputs)
-        return;
-
-    Window* window = seat->focused;
-
-    window->mon = prev;
-    window->tag = prev->seltag;
-
-    prev->tags[prev->seltag]->focused = window;
-}
-
+/* Request that River terminate the current compositor session. */
 void exit_session(Seat* seat, Arg* arg) {
     river_exit_session();
 }
 
+/* Set the layout used by the currently selected tag. */
 void set_layout(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
         selmon->tags[selmon->seltag]->lt = arg->v;
@@ -106,6 +55,12 @@ void set_layout(Seat* seat, Arg* arg) {
 }
 
 // TODO: loop and only through windows on selmon
+/*
+ * Select the next window in the global window list.
+ *
+ * This currently ignores monitor and tag membership. It should eventually
+ * skip windows that are not visible on the selected output.
+ */
 void focus_next(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
         Window* next = wl_container_of(seat->focused->link.next, seat->focused, link);
@@ -117,6 +72,11 @@ void focus_next(Seat* seat, Arg* arg) {
 }
 
 // TODO: loop and only through windows on selmon
+/*
+ * Select the previous window in the global window list.
+ *
+ * This currently ignores monitor and tag membership.
+ */
 void focus_prev(Seat* seat, Arg* arg) {
     if (seat->focused != NULL) {
         Window* prev = wl_container_of(seat->focused->link.prev, seat->focused, link);
@@ -127,12 +87,14 @@ void focus_prev(Seat* seat, Arg* arg) {
     }
 }
 
+/* Switch the selected output to the requested tag. */
 void view(Seat* seat, Arg* arg) {
     if (selmon != NULL) {
         selmon->seltag = arg->u;
     }
 }
 
+/* Move the focused window to a different tag on the selected output. */
 void tag(Seat* seat, Arg* arg) {
     if (seat->focused == NULL || selmon == NULL)
         return;
@@ -145,108 +107,18 @@ void tag(Seat* seat, Arg* arg) {
     selmon->tags[arg->u]->focused = window;
 }
 
+/* Fork and execute the command stored in arg->v. */
 void spawn(Seat* seat, Arg* arg) {
     if (fork() == 0)
         execvp(((char**)arg->v)[0], (char**)arg->v);
 }
 
-// TODO: reconsider how windows are treated here
-// Used for dragging
-// Used for dragging
-
-void anvl_add_window(Window* window) {
-    window->mon = selmon;
-    window->tag = selmon->seltag;
-
-    wl_list_insert(&anvl.windows, &window->link);
-
-    Tag* tag = selmon->tags[selmon->seltag];
-    tag->focused = window;
-
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) {
-        seat->focused = window;
-    }
-}
-
-void anvl_remove_window(Window* window) {
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) {
-        if (seat->focused == window)
-            seat->focused = NULL;
-    }
-
-    if (window->mon != NULL) {
-        Tag* tag = window->mon->tags[window->tag];
-
-        if (tag->focused == window)
-            tag->focused = NULL;
-    }
-
-    wl_list_remove(&window->link);
-}
-
-void anvl_add_output(Output* output) {
-    output->seltag = 0;
-    for (int i = 0; i < LENGTH(tags); i++) {
-        Tag* tag = calloc(1, sizeof(Tag));
-
-        tag->n = i;
-        tag->sym = tags[i];
-        tag->focused = NULL;
-        tag->lt = &layouts[0];
-
-        output->tags[i] = tag;
-    }
-
-    wl_list_insert(&anvl.outputs, &output->link);
-    if (selmon == NULL)
-        selmon = output;
-}
-
-void anvl_remove_output(Output* output) {
-    wl_list_remove(&output->link);
-
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon == output)
-            window->mon = NULL;
-    }
-
-    for (int i = 0; i < LENGTH(output->tags); i++)
-        free(output->tags[i]);
-
-    if (selmon == output)
-        selmon = NULL;
-
-    free(output);
-}
-
-void anvl_output_position(Output* output, int x, int y) {
-    output->x = x;
-    output->y = y;
-}
-
-void anvl_output_dimensions(Output* output, int width, int height) {
-    output->width = width;
-    output->height = height;
-}
-
-void anvl_manage(void) {
-    Seat* seat;
-    wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
-
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        river_window_prepare(window);
-    }
-
-    Output* output;
-    wl_list_for_each(output, &anvl.outputs, link) {
-        output->tags[output->seltag]->lt->manage(output);
-    }
-}
-
+/*
+ * Synchronize a seat's logical focus with River.
+ *
+ * If the seat has no focused window, a fallback window is selected. The
+ * focused window is raised and recorded as the focused window for its tag.
+ */
 void manage_seat(Seat* seat) {
     if (seat->focused == NULL && !wl_list_empty(&anvl.windows)) {
         seat->focused = wl_container_of(anvl.windows.prev, seat->focused, link);
@@ -264,6 +136,12 @@ void manage_seat(Seat* seat) {
     }
 }
 
+/* Arrange all visible windows in equal-width columns.
+ *
+ * Only windows belonging to this output and its currently selected tag are
+ * considered. Geometry is computed fresh on every layout pass; no persistent
+ * layout tree or per-window split state is stored.
+ */
 void tile(Output* output) {
     uint32_t n = 0;
 
@@ -284,6 +162,8 @@ void tile(Output* output) {
         - (show_bar ? barpx : 0)
         - 2 * gappx;
 
+    /// Divide the available width evenly between windows, reserving space
+    /// between adjacent windows for gaps.
     int window_width = (width - (n - 1) * gappx) / n;
 
     uint32_t i = 0;
@@ -309,6 +189,11 @@ void tile(Output* output) {
     }
 }
 
+/* Stack all visible windows on top of one another at full output size.
+ *
+ * Only the currently focused/raised window is normally visible to the user,
+ * but every window on the selected tag receives identical geometry.
+ */
 void monocle(Output* output) {
     Window* window;
 

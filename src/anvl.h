@@ -147,7 +147,6 @@ typedef struct {
 } Keys;
 
 void destroy_window(Seat* seat, Arg* arg);
-void focus_next_mon(Seat* seat, Arg* arg);
 void focus_prev_mon(Seat* seat, Arg* arg);
 void tag_next_mon(Seat* seat, Arg* arg);
 void tag_prev_mon(Seat* seat, Arg* arg);

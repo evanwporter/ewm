@@ -11,8 +11,8 @@ PROTO_HEADERS := $(patsubst protocol/%.xml, $(BUILD_DIR)/%-client-protocol.h, $(
 
 .PRECIOUS: $(BUILD_DIR)/%.o $(BUILD_DIR)/%.h $(BUILD_DIR)/%.c
 
-$(BUILD_DIR)/$(MAIN_FILE): $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(SRC_DIR)/$(MAIN_FILE).h $(SRC_DIR)/river.h $(SRC_DIR)/bar.h $(SRC_DIR)/$(CONFIG_FILE) $(PROTO_OBJS) $(PROTO_HEADERS)
-	$(CC) -o $@ $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/bar.c $(PROTO_OBJS) $(FLAGS)
+$(BUILD_DIR)/$(MAIN_FILE): $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/management.c $(SRC_DIR)/bar.c $(SRC_DIR)/$(MAIN_FILE).h $(SRC_DIR)/river.h $(SRC_DIR)/bar.h $(SRC_DIR)/$(CONFIG_FILE) $(PROTO_OBJS) $(PROTO_HEADERS)
+	$(CC) -o $@ $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/management.c $(SRC_DIR)/bar.c $(PROTO_OBJS) $(FLAGS)
 
 $(BUILD_DIR)/%-protocol.o: $(BUILD_DIR)/%-protocol.c
 	$(CC) -c $(FLAGS) $^ -o $@
