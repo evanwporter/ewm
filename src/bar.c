@@ -26,6 +26,7 @@
 #include "anvl.h"
 #include "config.h"
 #include "river.h"
+#include "status.h"
 
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
@@ -50,91 +51,6 @@ bool set_font_scale(int scale) {
     fcft_font = scaled_font;
     fcft_font_scale = scale;
     return true;
-}
-
-static bool read_line(const char* path, char* buf, size_t size) {
-    FILE* file = fopen(path, "r");
-    if (file == NULL)
-        return false;
-
-    bool ok = fgets(buf, size, file) != NULL;
-    fclose(file);
-    if (ok)
-        buf[strcspn(buf, "\n")] = '\0';
-    return ok;
-}
-
-static void wifi_status(char* buf, size_t size) {
-    DIR* net = opendir("/sys/class/net");
-    if (net == NULL) {
-        snprintf(buf, size, "Wi-Fi: ?");
-        return;
-    }
-
-    bool found = false;
-    bool connected = false;
-    struct dirent* entry;
-    while ((entry = readdir(net)) != NULL) {
-        if (entry->d_name[0] == '.')
-            continue;
-
-        char path[PATH_MAX];
-        struct stat st;
-        snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", entry->d_name);
-        if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
-            continue;
-
-        found = true;
-        snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", entry->d_name);
-        char state[16];
-        if (read_line(path, state, sizeof(state)) && strcmp(state, "up") == 0) {
-            connected = true;
-            break;
-        }
-    }
-    closedir(net);
-
-    snprintf(buf, size, "Wi-Fi: %s", !found ? "n/a" : connected ? "on"
-                                                                : "off");
-}
-
-static void battery_status(char* buf, size_t size) {
-    DIR* power = opendir("/sys/class/power_supply");
-    if (power == NULL) {
-        snprintf(buf, size, "Bat: n/a");
-        return;
-    }
-
-    struct dirent* entry;
-    while ((entry = readdir(power)) != NULL) {
-        if (strncmp(entry->d_name, "BAT", 3) != 0)
-            continue;
-
-        char path[PATH_MAX], capacity[16];
-        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", entry->d_name);
-        if (read_line(path, capacity, sizeof(capacity))) {
-            snprintf(buf, size, "Bat: %d%%", atoi(capacity));
-            closedir(power);
-            return;
-        }
-    }
-    closedir(power);
-    snprintf(buf, size, "Bat: n/a");
-}
-
-static void format_status(char* buf, size_t size) {
-    char wifi[24], battery[24], clock[64];
-    wifi_status(wifi, sizeof(wifi));
-    battery_status(battery, sizeof(battery));
-
-    time_t now = time(NULL);
-    struct tm local_time;
-    if (localtime_r(&now, &local_time) == NULL)
-        snprintf(clock, sizeof(clock), "time: ?");
-    else
-        strftime(clock, sizeof(clock), status_time_format, &local_time);
-
-    snprintf(buf, size, "%s  |  %s  |  %s", wifi, battery, clock);
 }
 
 void randname(char* buf) {
@@ -189,36 +105,96 @@ int cx(int x, int width, int text_width) {
 }
 
 int rx(int x, int width, int text_width) { return x - text_width; }
-void render_chars(const char* chars, size_t len, int x, int y, int width, int (*fx)(int, int, int), pixman_image_t* pix, pixman_image_t* color) {
+
+void render_chars(
+    const char* chars,
+    size_t len,
+    int x,
+    int y,
+    int width,
+    int (*fx)(int, int, int),
+    pixman_image_t* pix,
+    pixman_image_t* color) {
     const struct fcft_glyph* glyphs[len];
     long kern[len];
     int text_width = 0;
 
     for (size_t i = 0; i < len; i++) {
-        glyphs[i] = fcft_rasterize_char_utf32(fcft_font, chars[i], FCFT_SUBPIXEL_NONE);
+        glyphs[i] = fcft_rasterize_char_utf32(
+            fcft_font,
+            chars[i],
+            FCFT_SUBPIXEL_NONE);
+
         if (glyphs[i] == NULL)
             continue;
 
         kern[i] = 0;
+
         if (i > 0) {
             long x_kern;
-            if (fcft_kerning(fcft_font, chars[i - 1], chars[i], &x_kern, NULL))
+
+            if (fcft_kerning(
+                    fcft_font,
+                    chars[i - 1],
+                    chars[i],
+                    &x_kern,
+                    NULL)) {
                 kern[i] = x_kern;
+            }
         }
 
         text_width += kern[i] + glyphs[i]->advance.x;
     }
 
-    int cx = fx(x, width, text_width);
+    int px = fx(x, width, text_width);
+
+    /*
+     * Limit drawing to the caller's allocated width.
+     *
+     * width == 0 is currently used by the right-aligned status text,
+     * so only install a clip when an actual width was provided.
+     */
+    pixman_region32_t clip;
+
+    if (width > 0) {
+        pixman_region32_init_rect(
+            &clip,
+            x,
+            0,
+            width,
+            pixman_image_get_height(pix));
+
+        pixman_image_set_clip_region32(pix, &clip);
+    }
+
     for (size_t i = 0; i < len; i++) {
         const struct fcft_glyph* g = glyphs[i];
+
         if (g == NULL)
             continue;
-        cx += kern[i];
 
-        pixman_image_composite32(PIXMAN_OP_OVER, color, g->pix, pix, 0, 0, 0, 0, cx + g->x, y + fcft_font->ascent - g->y, g->width, g->height);
+        px += kern[i];
 
-        cx += g->advance.x;
+        pixman_image_composite32(
+            PIXMAN_OP_OVER,
+            color,
+            g->pix,
+            pix,
+            0,
+            0,
+            0,
+            0,
+            px + g->x,
+            y + fcft_font->ascent - g->y,
+            g->width,
+            g->height);
+
+        px += g->advance.x;
+    }
+
+    if (width > 0) {
+        pixman_image_set_clip_region32(pix, NULL);
+        pixman_region32_fini(&clip);
     }
 }
 

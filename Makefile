@@ -1,38 +1,71 @@
-MAIN_FILE := anvl
-CONFIG_FILE := config.h
+CC ?= cc
+
+MAIN := anvl
 
 SRC_DIR := src
-BUILD_DIR := .build
+BUILD_DIR := build
+PROTO_DIR := protocol
 
-FLAGS := -std=c23 -I $(BUILD_DIR) $(shell pkg-config --cflags --libs xkbcommon wayland-client pixman-1 fcft)
+SRC := \
+	$(SRC_DIR)/anvl.c \
+	$(SRC_DIR)/river.c \
+	$(SRC_DIR)/management.c \
+	$(SRC_DIR)/bar.c \
+	$(SRC_DIR)/status.c
 
-PROTO_OBJS := $(patsubst protocol/%.xml, $(BUILD_DIR)/%-protocol.o, $(shell fd -e xml . protocol))
-PROTO_HEADERS := $(patsubst protocol/%.xml, $(BUILD_DIR)/%-client-protocol.h, $(shell fd -e xml . protocol))
+OBJ := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
-.PRECIOUS: $(BUILD_DIR)/%.o $(BUILD_DIR)/%.h $(BUILD_DIR)/%.c
+PROTO_XML := $(shell fd -e xml . $(PROTO_DIR))
+PROTO_SRC := $(patsubst $(PROTO_DIR)/%.xml,$(BUILD_DIR)/%-protocol.c,$(PROTO_XML))
+PROTO_HDR := $(patsubst $(PROTO_DIR)/%.xml,$(BUILD_DIR)/%-client-protocol.h,$(PROTO_XML))
+PROTO_OBJ := $(PROTO_SRC:.c=.o)
 
-$(BUILD_DIR)/$(MAIN_FILE): $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/management.c $(SRC_DIR)/bar.c $(SRC_DIR)/$(MAIN_FILE).h $(SRC_DIR)/river.h $(SRC_DIR)/bar.h $(SRC_DIR)/$(CONFIG_FILE) $(PROTO_OBJS) $(PROTO_HEADERS)
-	$(CC) -o $@ $(SRC_DIR)/$(MAIN_FILE).c $(SRC_DIR)/river.c $(SRC_DIR)/management.c $(SRC_DIR)/bar.c $(PROTO_OBJS) $(FLAGS)
+DEP := $(OBJ:.o=.d) $(PROTO_OBJ:.o=.d)
 
-$(BUILD_DIR)/%-protocol.o: $(BUILD_DIR)/%-protocol.c
-	$(CC) -c $(FLAGS) $^ -o $@
+PKGS := xkbcommon wayland-client pixman-1 fcft
 
-$(BUILD_DIR)/%.h: 
-	wayland-scanner client-header $(patsubst $(BUILD_DIR)/%-client-protocol.h, protocol/%.xml, $@) $@
+CPPFLAGS := \
+	-I$(SRC_DIR) \
+	-I$(BUILD_DIR) \
+	$(shell pkg-config --cflags $(PKGS))
 
-$(BUILD_DIR)/%.c: 
-	wayland-scanner private-code $(patsubst $(BUILD_DIR)/%-protocol.c, protocol/%.xml, $@) $@
+CFLAGS := \
+	-std=c23 \
+	-MMD \
+	-MP
 
-$(BUILD_DIR):
-	mkdir $(BUILD_DIR)
+LDLIBS := $(shell pkg-config --libs $(PKGS))
+
+all: $(BUILD_DIR)/$(MAIN)
 
 compile_commands:
-	bear --output compile_commands.json -- make clean build
+	bear --output compile_commands.json -- make clean all
 
-.PHONY: build compile_commands
+$(BUILD_DIR)/$(MAIN): $(OBJ) $(PROTO_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
-build: $(BUILD_DIR) $(BUILD_DIR)/$(MAIN_FILE)
+# Normal source files may include generated Wayland protocol headers,
+# so ensure those headers exist before compiling any normal object.
+$(OBJ): $(PROTO_HDR)
 
-.PHONY: clean
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%-protocol.o: $(BUILD_DIR)/%-protocol.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%-client-protocol.h: $(PROTO_DIR)/%.xml | $(BUILD_DIR)
+	wayland-scanner client-header $< $@
+
+$(BUILD_DIR)/%-protocol.c: $(PROTO_DIR)/%.xml | $(BUILD_DIR)
+	wayland-scanner private-code $< $@
+
+$(BUILD_DIR):
+	mkdir -p $@
+
 clean:
 	rm -rf $(BUILD_DIR)
+
+-include $(DEP)
+
+.PHONY: all clean compile_commands
