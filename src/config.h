@@ -6,6 +6,7 @@
 static const unsigned int gappx = 0;
 static const int borderpx = 2;
 static const uint32_t border_rgba[] = { 0x89b4fa, 0x89b4fa, 0x89b4fa, 0xffffffff };
+static const uint32_t focused_border_rgba[] = { 0xe7e7e7e7, 0x8a8a8a8a, 0x3e3e3e3e, 0xffffffff };
 static const bool show_bar = true;
 static const int barpx = 24;
 static const bool top_bar = false; // 0 means bottom bar

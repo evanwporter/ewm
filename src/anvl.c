@@ -10,7 +10,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -29,11 +28,19 @@
 #define MIN(A, B) (A < B ? A : B)
 #define MAX(A, B) (A > B ? A : B)
 #define LENGTH(A) (sizeof A / sizeof A[0])
-#define ISVISIBLE(C) (C->tagmask & C->mon->tagmask)
+
+/// Checks to whether the Client is displayed
+/// on the Client's Monitors current tags
+#define ISVISIBLE(C) (C->tag & C->mon->tagmask)
+
 #define CLAMP(VAL, MIN, MAX) VAL = VAL < MIN ? MIN : (VAL > MAX ? MAX : VAL)
+
+#define HIDDEN(C) (getstate((C)->win) == IconicState)
 
 WindowManager anvl;
 Output* selmon = NULL;
+
+// #define ISVISIBLE(C) ((WORKSPACEBIT(C->workspace) & C->mon->selected_workspaces[C->mon->sel_ws]))
 
 /* Close the currently focused window, if one exists. */
 void destroy_window(Seat* seat, Arg* arg) {
@@ -54,36 +61,54 @@ void set_layout(Seat* seat, Arg* arg) {
     }
 }
 
-// TODO: loop and only through windows on selmon
-/*
- * Select the next window in the global window list.
- *
- * This currently ignores monitor and tag membership. It should eventually
- * skip windows that are not visible on the selected output.
- */
+static bool focusable_on_selected_tag(const Client* client) {
+    return selmon != NULL && client->mon == selmon && client->tag == selmon->seltag
+        && !client->hidden;
+}
+
+/* Find the next/previous visible client on the selected output, wrapping at
+ * either end just as dwm's focusstack does. */
+static Client* focusstack_client(Client* current, bool forward) {
+    if (selmon == NULL || wl_list_empty(&anvl.windows))
+        return NULL;
+
+    struct wl_list* node = current == NULL
+        ? (forward ? anvl.windows.next : anvl.windows.prev)
+        : (forward ? current->link.next : current->link.prev);
+
+    while (node != &anvl.windows) {
+        Client* client = wl_container_of(node, client, link);
+        if (focusable_on_selected_tag(client))
+            return client;
+        node = forward ? node->next : node->prev;
+    }
+
+    node = forward ? anvl.windows.next : anvl.windows.prev;
+    while (node != &anvl.windows) {
+        Client* client = wl_container_of(node, client, link);
+        if (focusable_on_selected_tag(client))
+            return client;
+        node = forward ? node->next : node->prev;
+    }
+
+    return NULL;
+}
+
+/* Select the next visible window in client/layout order. */
 void focus_next(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL) {
-        Window* next = wl_container_of(seat->focused->link.next, seat->focused, link);
-        if (next != NULL && &next->link != &anvl.windows) {
-            seat->focused = next;
-            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
-        }
+    Client* next = focusstack_client(seat->focused, true);
+    if (next != NULL) {
+        anvl_focus_client(seat, next);
+        river_pointer_warp(seat, next->x + next->width / 2, next->y + next->height / 2);
     }
 }
 
-// TODO: loop and only through windows on selmon
-/*
- * Select the previous window in the global window list.
- *
- * This currently ignores monitor and tag membership.
- */
+/* Select the previous visible window in client/layout order. */
 void focus_prev(Seat* seat, Arg* arg) {
-    if (seat->focused != NULL) {
-        Window* prev = wl_container_of(seat->focused->link.prev, seat->focused, link);
-        if (prev != NULL && &prev->link != &anvl.windows) {
-            seat->focused = prev;
-            river_pointer_warp(seat, seat->focused->x + seat->focused->width / 2, seat->focused->y + seat->focused->height / 2);
-        }
+    Client* prev = focusstack_client(seat->focused, false);
+    if (prev != NULL) {
+        anvl_focus_client(seat, prev);
+        river_pointer_warp(seat, prev->x + prev->width / 2, prev->y + prev->height / 2);
     }
 }
 
@@ -99,18 +124,35 @@ void tag(Seat* seat, Arg* arg) {
     if (seat->focused == NULL || selmon == NULL)
         return;
 
-    Window* window = seat->focused;
+    Client* window = seat->focused;
 
+    wl_list_remove(&window->focus_link);
     window->mon = selmon;
     window->tag = arg->u;
+    wl_list_insert(&selmon->focus_stack, &window->focus_link);
 
-    selmon->tags[arg->u]->focused = window;
+    anvl_focus_client(seat, window);
 }
 
 /* Fork and execute the command stored in arg->v. */
 void spawn(Seat* seat, Arg* arg) {
     if (fork() == 0)
         execvp(((char**)arg->v)[0], (char**)arg->v);
+}
+
+/* User function to move the selected client to become the new master client. If the selected
+ * client is the master client then the master and the next tiled window will swap places. */
+void zoom(Seat* seat, Arg* arg) {
+    if (seat->focused == NULL)
+        return;
+
+    Client* client = seat->focused;
+
+    if (client->is_floating || !ISVISIBLE(client))
+        return;
+
+    wl_list_remove(&client->link);
+    wl_list_insert(&anvl.windows, &client->link);
 }
 
 /*
@@ -120,17 +162,17 @@ void spawn(Seat* seat, Arg* arg) {
  * focused window is raised and recorded as the focused window for its tag.
  */
 void manage_seat(Seat* seat) {
-    if (seat->focused == NULL && !wl_list_empty(&anvl.windows)) {
-        seat->focused = wl_container_of(anvl.windows.prev, seat->focused, link);
+    if (!focusable_on_selected_tag(seat->focused)) {
+        Client* saved = selmon == NULL ? NULL : selmon->tags[selmon->seltag]->focused;
+        seat->focused = focusable_on_selected_tag(saved)
+            ? saved
+            : focusstack_client(NULL, true);
     }
 
     if (seat->focused != NULL) {
+        anvl_focus_client(seat, seat->focused);
         river_focus_window(seat, seat->focused);
         river_raise_window(seat->focused);
-
-        seat->focused->mon
-            ->tags[seat->focused->tag]
-            ->focused = seat->focused;
     } else {
         river_clear_focus(seat);
     }
@@ -143,50 +185,148 @@ void manage_seat(Seat* seat) {
  * layout tree or per-window split state is stored.
  */
 void tile(Output* output) {
+    Client* client;
     uint32_t n = 0;
 
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon == output && window->tag == output->seltag)
-            n++;
+    /*
+     * Count tiled clients.
+     */
+    wl_list_for_each(client, &anvl.windows, link) {
+        if (client->mon != output
+            || client->tag != output->seltag
+            || client->is_floating
+            || client->hidden) {
+            continue;
+        }
+
+        n++;
     }
 
     if (n == 0)
         return;
 
+    Tag* tag = output->tags[output->seltag];
+
+    unsigned int nmaster = tag->nmaster;
+    float mfact = tag->mfact;
+
+    /*
+     * Usable output geometry.
+     */
     int x = output->x + gappx;
-    int y = output->y + (show_bar && top_bar ? barpx : 0) + gappx;
+    int y = output->y
+        + (show_bar && top_bar ? barpx : 0)
+        + gappx;
 
     int width = output->width - 2 * gappx;
     int height = output->height
         - (show_bar ? barpx : 0)
         - 2 * gappx;
 
-    /// Divide the available width evenly between windows, reserving space
-    /// between adjacent windows for gaps.
-    int window_width = (width - (n - 1) * gappx) / n;
+    /*
+     * Determine width of master area.
+     *
+     * If everything fits in the master area, it gets the full width.
+     */
+    int master_width;
 
-    uint32_t i = 0;
+    if (n > nmaster) {
+        if (nmaster > 0)
+            master_width = (int)((width - gappx) * mfact);
+        else
+            master_width = 0;
+    } else {
+        master_width = width;
+    }
 
-    wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon != output || window->tag != output->seltag)
+    unsigned int i = 0;
+    unsigned int master_i = 0;
+    unsigned int stack_i = 0;
+
+    wl_list_for_each(client, &anvl.windows, link) {
+        if (client->mon != output
+            || client->tag != output->seltag
+            || client->is_floating
+            || client->hidden) {
             continue;
+        }
 
-        int wx = x + i * (window_width + gappx);
+        int cx;
+        int cy;
+        int cw;
+        int ch;
 
         /*
-         * Give rounding remainder to final window.
+         * Master side.
          */
-        int ww = i == n - 1
-            ? x + width - wx
-            : window_width;
+        if (i < nmaster) {
+            unsigned int count = MIN(n, nmaster);
 
-        river_window_show(window);
-        river_window_move(window, wx, y);
-        river_window_resize(window, ww, height);
+            int usable_height = height - (count - 1) * gappx;
+
+            int base_height = usable_height / count;
+
+            cx = x;
+            cy = y + master_i * (base_height + gappx);
+
+            cw = master_width;
+
+            /*
+             * Give any division remainder to the final client.
+             */
+            if (master_i == count - 1)
+                ch = y + height - cy;
+            else
+                ch = base_height;
+
+            master_i++;
+        }
+
+        /*
+         * Stack side.
+         */
+        else {
+            unsigned int count = n - nmaster;
+
+            int usable_height = height - (count - 1) * gappx;
+
+            int base_height = usable_height / count;
+
+            cx = x + master_width + gappx;
+            cy = y + stack_i * (base_height + gappx);
+
+            cw = width - master_width - gappx;
+
+            if (stack_i == count - 1)
+                ch = y + height - cy;
+            else
+                ch = base_height;
+
+            stack_i++;
+        }
+
+        river_window_show(client);
+        river_window_move(client, cx, cy);
+        river_window_resize(client, cw, ch);
 
         i++;
     }
+}
+
+void hide_window(Client* client) {
+    if (client->hidden)
+        return;
+
+    client->hidden = true;
+    river_window_hide(client);
+}
+
+void show_client(Client* client) {
+    if (!client->hidden)
+        return;
+
+    client->hidden = false;
+    river_window_show(client);
 }
 
 /* Stack all visible windows on top of one another at full output size.
@@ -195,7 +335,7 @@ void tile(Output* output) {
  * but every window on the selected tag receives identical geometry.
  */
 void monocle(Output* output) {
-    Window* window;
+    Client* window;
 
     wl_list_for_each(window, &anvl.windows, link) {
         if (window->mon != output || window->tag != output->seltag)

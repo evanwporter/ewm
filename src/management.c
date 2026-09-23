@@ -8,21 +8,17 @@
 #include <sys/mman.h>
 
 #include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <fcft/fcft.h>
 
 #include "anvl.h"
-#include "bar.h"
 #include "config.h"
 #include "river.h"
 
@@ -31,6 +27,23 @@
 #define LENGTH(A) (sizeof A / sizeof A[0])
 #define ISVISIBLE(C) (C->tagmask & C->mon->tagmask)
 #define CLAMP(VAL, MIN, MAX) VAL = VAL < MIN ? MIN : (VAL > MAX ? MAX : VAL)
+
+/* Record a focus change in the same MRU stack used by dwm for stacking.
+ * A client can only be in one output's focus stack, so moving it to the
+ * front also keeps the stack correct when a client is retagged. */
+void anvl_focus_client(Seat* seat, Client* client) {
+    if (client == NULL)
+        return;
+
+    seat->focused = client;
+
+    if (client->mon == NULL)
+        return;
+
+    wl_list_remove(&client->focus_link);
+    wl_list_insert(&client->mon->focus_stack, &client->focus_link);
+    client->mon->tags[client->tag]->focused = client;
+}
 
 // TODO: reconsider how windows are treated here
 // Used for dragging
@@ -42,18 +55,20 @@
  * New windows are placed on the selected output and its currently active tag.
  * The new window also becomes the focused window for all seats.
  */
-void anvl_add_window(Window* window) {
+void anvl_add_window(Client* window) {
     window->mon = selmon;
     window->tag = selmon->seltag;
 
+    wl_list_init(&window->focus_link);
     wl_list_insert(&anvl.windows, &window->link);
+    wl_list_insert(&selmon->focus_stack, &window->focus_link);
 
     Tag* tag = selmon->tags[selmon->seltag];
     tag->focused = window;
 
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) {
-        seat->focused = window;
+        anvl_focus_client(seat, window);
     }
 }
 
@@ -63,7 +78,7 @@ void anvl_add_window(Window* window) {
  * Any seat currently focusing this window has its focus cleared. The window
  * is then removed from the global window list.
  */
-void anvl_remove_window(Window* window) {
+void anvl_remove_window(Client* window) {
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) {
         if (seat->focused == window)
@@ -78,6 +93,7 @@ void anvl_remove_window(Window* window) {
     }
 
     wl_list_remove(&window->link);
+    wl_list_remove(&window->focus_link);
 }
 
 /*
@@ -88,6 +104,7 @@ void anvl_remove_window(Window* window) {
  */
 void anvl_add_output(Output* output) {
     output->seltag = 0;
+    wl_list_init(&output->focus_stack);
     for (int i = 0; i < LENGTH(tags); i++) {
         Tag* tag = calloc(1, sizeof(Tag));
 
@@ -95,6 +112,8 @@ void anvl_add_output(Output* output) {
         tag->sym = tags[i];
         tag->focused = NULL;
         tag->lt = &layouts[0];
+        tag->nmaster = 1;
+        tag->mfact = 0.55f;
 
         output->tags[i] = tag;
     }
@@ -113,10 +132,10 @@ void anvl_add_output(Output* output) {
 void anvl_remove_output(Output* output) {
     wl_list_remove(&output->link);
 
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        if (window->mon == output)
-            window->mon = NULL;
+    Client* client;
+    wl_list_for_each(client, &anvl.windows, link) {
+        if (client->mon == output)
+            client->mon = NULL;
     }
 
     for (int i = 0; i < LENGTH(output->tags); i++)
@@ -149,9 +168,9 @@ void anvl_manage(void) {
     Seat* seat;
     wl_list_for_each(seat, &anvl.seats, link) { manage_seat(seat); }
 
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) {
-        river_window_prepare(window);
+    Client* client;
+    wl_list_for_each(client, &anvl.windows, link) {
+        river_window_prepare(client);
     }
 
     Output* output;

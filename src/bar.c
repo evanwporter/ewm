@@ -289,7 +289,7 @@ void render_bar(WlOutput* output) {
     /// Bitmask that holds occupied workspaces.
     unsigned int occ = 0;
 
-    Window* window;
+    Client* window;
     wl_list_for_each(window, &anvl.windows, link) {
         if (window->mon == output->output)
             occ |= 1U << window->tag;

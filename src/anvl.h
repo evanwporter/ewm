@@ -1,6 +1,7 @@
 #ifndef ANVLH
 #define ANVLH
 
+#include <math.h>
 #include <stdint.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
@@ -19,18 +20,24 @@ struct river_pointer_binding_v1;
 struct zwlr_layer_surface_v1;
 
 typedef struct WlOutput WlOutput;
-typedef struct Window Window;
+typedef struct Client Client;
 typedef struct Output Output;
 typedef struct Layout Layout;
 typedef struct Seat Seat;
 typedef struct Tag Tag;
 
-struct Window {
+struct Client {
     struct river_window_v1* river_window;
     struct river_node_v1* river_node;
-    struct wl_list link;
+    int is_floating;
 
     char* title;
+
+    /// Whether the client is hidden or not
+    int hidden;
+
+    struct wl_list link; // client/layout ordering
+    struct wl_list focus_link; // MRU focus ordering
 
     int x;
     int y;
@@ -46,15 +53,27 @@ struct Tag {
     int n;
     const char* sym;
 
-    Window* focused;
+    Client* focused;
 
     Layout* lt;
+
+    unsigned int nmaster;
+    float mfact;
 };
 
 struct Output {
     struct river_output_v1* river_output;
     struct river_layer_shell_output_v1* river_layer_shell;
+
+    /* The client list. This represents the start of a linked list of clients which determines
+     * the order in which clients are tiled. */
+    /// Points to the first client in the list
     struct wl_list link;
+
+    /* The stacking order list. This represents the order in which client windows are stacked on
+     * top of each other, as well as the order in which clients had last focus. */
+    /// Points to the first Client in the list
+    struct wl_list focus_stack;
 
     int x;
     int y;
@@ -62,7 +81,10 @@ struct Output {
     int width;
     int height;
 
-    uint32_t seltag;
+    unsigned int seltag;
+
+    unsigned int tagmask;
+
     Tag* tags[9];
 };
 
@@ -88,7 +110,8 @@ struct Seat {
     struct river_seat_v1* river_seat;
     struct wl_list link;
 
-    Window* focused;
+    /// The currently focused client
+    Client* focused;
 
     struct wl_list keys;
     struct wl_list buttons;
@@ -161,8 +184,10 @@ void tag(Seat* seat, Arg* arg);
 void tile(Output* output);
 void monocle(Output* output);
 void manage_seat(Seat* seat);
-void anvl_add_window(Window* window);
-void anvl_remove_window(Window* window);
+void anvl_focus_client(Seat* seat, Client* client);
+
+void anvl_add_window(Client* window);
+void anvl_remove_window(Client* window);
 void anvl_add_output(Output* output);
 void anvl_remove_output(Output* output);
 void anvl_output_position(Output* output, int x, int y);

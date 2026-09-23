@@ -84,7 +84,7 @@ const struct river_output_v1_listener output_listener = {
 };
 
 void river_window_v1_closed(void* data, struct river_window_v1* obj) {
-    Window* window = data;
+    Client* window = data;
 
     anvl_remove_window(window);
 
@@ -96,14 +96,14 @@ void river_window_v1_closed(void* data, struct river_window_v1* obj) {
 void river_window_v1_dimensions_hint(void* data, struct river_window_v1* obj, int32_t min_width, int32_t min_height, int32_t max_width, int32_t max_height) { }
 
 void river_window_v1_dimensions(void* data, struct river_window_v1* obj, int32_t width, int32_t height) {
-    struct Window* window = data;
-    window->width = width;
-    window->height = height;
+    struct Client* client = data;
+    client->width = width;
+    client->height = height;
 }
 
 void river_window_v1_app_id(void* data, struct river_window_v1* obj, const char* app_id) { }
 void river_window_v1_title(void* data, struct river_window_v1* obj, const char* title) {
-    Window* window = data;
+    Client* window = data;
 
     free(window->title);
     window->title = title == NULL ? NULL : strdup(title);
@@ -144,35 +144,37 @@ const struct river_window_v1_listener window_listener = {
     .identifier = river_window_v1_identifier,
 };
 
-void river_window_move(Window* window, int x, int y) {
+void river_window_move(Client* window, int x, int y) {
     window->x = x;
     window->y = y;
     river_node_v1_set_position(window->river_node, window->x, window->y);
 }
 
-void river_window_resize(Window* window, int width, int height) {
+void river_window_resize(Client* window, int width, int height) {
     window->width = width;
     window->height = height;
     river_window_v1_propose_dimensions(window->river_window, window->width, window->height);
 }
 
-void river_window_close(Window* window) { river_window_v1_close(window->river_window); }
-void river_window_show(Window* window) { river_window_v1_show(window->river_window); }
-void river_window_hide(Window* window) { river_window_v1_hide(window->river_window); }
-void river_window_prepare(Window* window) {
+void river_window_close(Client* window) { river_window_v1_close(window->river_window); }
+void river_window_show(Client* window) { river_window_v1_show(window->river_window); }
+void river_window_hide(Client* window) { river_window_v1_hide(window->river_window); }
+void river_window_prepare(Client* window) {
     river_window_v1_use_ssd(window->river_window);
     river_window_v1_set_tiled(window->river_window, 15);
     river_window_hide(window);
 }
-void river_window_set_borders(Window* window) {
+void river_window_set_borders(Client* window, bool focused) {
+    const uint32_t* rgba = focused ? focused_border_rgba : border_rgba;
+
     river_window_v1_set_borders(
-        window->river_window, 15, borderpx, border_rgba[0], border_rgba[1], border_rgba[2], border_rgba[3]);
+        window->river_window, 15, borderpx, rgba[0], rgba[1], rgba[2], rgba[3]);
 }
-void river_focus_window(Seat* seat, Window* window) {
+void river_focus_window(Seat* seat, Client* window) {
     river_seat_v1_focus_window(seat->river_seat, window->river_window);
 }
 void river_clear_focus(Seat* seat) { river_seat_v1_clear_focus(seat->river_seat); }
-void river_raise_window(Window* window) { river_node_v1_place_top(window->river_node); }
+void river_raise_window(Client* window) { river_node_v1_place_top(window->river_node); }
 void river_pointer_warp(Seat* seat, int x, int y) {
     river_seat_v1_pointer_warp(seat->river_seat, x, y);
 }
@@ -272,20 +274,20 @@ void river_seat_v1_wl_seat(void* data, struct river_seat_v1* obj, uint32_t id) {
 
 void river_seat_v1_pointer_enter(void* data, struct river_seat_v1* obj, struct river_window_v1* river_window) {
     Seat* seat = data;
-    Window* window = river_window_v1_get_user_data(river_window);
+    Client* window = river_window_v1_get_user_data(river_window);
 
-    seat->focused = window;
+    anvl_focus_client(seat, window);
 }
 
 void river_seat_v1_pointer_leave(void* data, struct river_seat_v1* obj) { }
 
 void river_seat_v1_window_interaction(void* data, struct river_seat_v1* obj, struct river_window_v1* river_window) {
     Seat* seat = data;
-    Window* window = seat->focused;
+    Client* window = seat->focused;
 
     window = river_window_v1_get_user_data(river_window);
 
-    seat->focused = window;
+    anvl_focus_client(seat, window);
 }
 
 void river_seat_v1_shell_surface_interaction(
@@ -342,8 +344,12 @@ void river_window_manager_v1_manage_start(void* data, struct river_window_manage
 }
 
 void river_window_manager_v1_render_start(void* data, struct river_window_manager_v1* obj) {
-    Window* window;
-    wl_list_for_each(window, &anvl.windows, link) { river_window_set_borders(window); }
+    Client* window;
+    wl_list_for_each(window, &anvl.windows, link) {
+        bool focused = window->mon != NULL
+            && window == window->mon->tags[window->tag]->focused;
+        river_window_set_borders(window, focused);
+    }
 
     WlOutput* output;
     wl_list_for_each(output, &anvl.wl_outputs, link) { render_bar(output); }
@@ -397,7 +403,7 @@ void river_window_manager_v1_session_unlocked(
     void* data, struct river_window_manager_v1* obj) { }
 
 void river_window_manager_v1_window(void* data, struct river_window_manager_v1* obj, struct river_window_v1* river_window) {
-    Window* window = calloc(1, sizeof(Window));
+    Client* window = calloc(1, sizeof(Client));
     window->river_window = river_window;
     window->river_node = river_window_v1_get_node(window->river_window);
 
