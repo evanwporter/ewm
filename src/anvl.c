@@ -35,12 +35,8 @@
 
 #define CLAMP(VAL, MIN, MAX) VAL = VAL < MIN ? MIN : (VAL > MAX ? MAX : VAL)
 
-#define HIDDEN(C) (getstate((C)->win) == IconicState)
-
 WindowManager anvl;
 Output* selmon = NULL;
-
-// #define ISVISIBLE(C) ((WORKSPACEBIT(C->workspace) & C->mon->selected_workspaces[C->mon->sel_ws]))
 
 /* Close the currently focused window, if one exists. */
 void destroy_window(Seat* seat, Arg* arg) {
@@ -67,7 +63,7 @@ static bool focusable_on_selected_tag(const Client* client) {
 }
 
 /* Find the next/previous visible client on the selected output, wrapping at
- * either end just as dwm's focusstack does. */
+ * either end */
 static Client* focusstack_client(Client* current, bool forward) {
     if (selmon == NULL || wl_list_empty(&anvl.windows))
         return NULL;
