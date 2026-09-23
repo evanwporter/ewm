@@ -1,71 +1,62 @@
 CC ?= cc
 
-MAIN := ewm
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
-SRC_DIR := src
-BUILD_DIR := build
-PROTO_DIR := protocol
+CFLAGS ?= -O2
+CFLAGS += -std=c99 \
+          -D_POSIX_C_SOURCE=200809L \
+          -Wall -Wextra -Wpedantic \
+          -Wno-unused-parameter \
+          -I. \
+          $(shell pkg-config --cflags wayland-client xkbcommon)
 
-SRC := \
-	$(SRC_DIR)/ewm.c \
-	$(SRC_DIR)/river.c \
-	$(SRC_DIR)/management.c \
-	$(SRC_DIR)/bar.c \
-	$(SRC_DIR)/status.c
+LDLIBS += $(shell pkg-config --libs wayland-client xkbcommon)
 
-OBJ := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
+WAYLAND_SCANNER ?= wayland-scanner
 
-PROTO_XML := $(shell fd -e xml . $(PROTO_DIR))
-PROTO_SRC := $(patsubst $(PROTO_DIR)/%.xml,$(BUILD_DIR)/%-protocol.c,$(PROTO_XML))
-PROTO_HDR := $(patsubst $(PROTO_DIR)/%.xml,$(BUILD_DIR)/%-client-protocol.h,$(PROTO_XML))
-PROTO_OBJ := $(PROTO_SRC:.c=.o)
+PROTOCOL_DIR = protocol
 
-DEP := $(OBJ:.o=.d) $(PROTO_OBJ:.o=.d)
+PROTOCOLS = \
+	river-window-management-v1 \
+	river-xkb-bindings-v1
 
-PKGS := xkbcommon wayland-client pixman-1 fcft
+GENERATED_HEADERS = $(addsuffix -client-protocol.h,$(PROTOCOLS))
+GENERATED_SOURCES = $(addsuffix -protocol.c,$(PROTOCOLS))
 
-CPPFLAGS := \
-	-I$(SRC_DIR) \
-	-I$(BUILD_DIR) \
-	$(shell pkg-config --cflags $(PKGS))
+SRC = tinyrwm.c $(GENERATED_SOURCES)
+OBJ = $(SRC:.c=.o)
 
-CFLAGS := \
-	-std=c23 \
-	-MMD \
-	-MP
+TARGET = tinyrwm
 
-LDLIBS := $(shell pkg-config --libs $(PKGS))
 
-all: $(BUILD_DIR)/$(MAIN)
+.PHONY: all clean install uninstall compile_commands
 
-compile_commands:
-	bear --output compile_commands.json -- make clean all
+all: $(TARGET)
 
-$(BUILD_DIR)/$(MAIN): $(OBJ) $(PROTO_OBJ)
-	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+$(TARGET): $(OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
-# Normal source files may include generated Wayland protocol headers,
-# so ensure those headers exist before compiling any normal object.
-$(OBJ): $(PROTO_HDR)
+tinyrwm.o: tinyrwm.c $(GENERATED_HEADERS)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+%-client-protocol.h: $(PROTOCOL_DIR)/%.xml
+	$(WAYLAND_SCANNER) client-header $< $@
 
-$(BUILD_DIR)/%-protocol.o: $(BUILD_DIR)/%-protocol.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+%-protocol.c: $(PROTOCOL_DIR)/%.xml
+	$(WAYLAND_SCANNER) private-code $< $@
 
-$(BUILD_DIR)/%-client-protocol.h: $(PROTO_DIR)/%.xml | $(BUILD_DIR)
-	wayland-scanner client-header $< $@
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%-protocol.c: $(PROTO_DIR)/%.xml | $(BUILD_DIR)
-	wayland-scanner private-code $< $@
+install: $(TARGET)
+	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
-$(BUILD_DIR):
-	mkdir -p $@
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -f $(TARGET) $(OBJ) $(GENERATED_HEADERS) $(GENERATED_SOURCES)
 
--include $(DEP)
-
-.PHONY: all clean compile_commands
+compile_commands:
+	$(MAKE) clean
+	bear -- $(MAKE)
